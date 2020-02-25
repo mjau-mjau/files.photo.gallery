@@ -1,0 +1,23 @@
+{
+  "name": "files.photo.gallery",
+  "version": "0.0.4",
+  "description": "Single-file PHP file gallery and file manager / https://files.photo.gallery/demo/",
+  "main": "index.php",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "php",
+    "javascript",
+    "single-file",
+    "fileviewer",
+    "filemanager",
+    "gallery",
+    "iptc",
+    "exif",
+    "gps"
+  ],
+  "author": "Karl Ward <karl@photo.gallery> (https://www.photo.gallery)",
+  "license": "ISC",
+  "homepage": "https://files.photo.gallery/"
+}
