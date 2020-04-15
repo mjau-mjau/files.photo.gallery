@@ -21,7 +21,7 @@ Files is a single-file PHP application that can be dropped into any directory, a
 
 ### Instructions
 
-Simply drop index.php into any directory, and it will create a gallery of all files and a menu from the subfolders of the directory. For advanced configuration, open index.php in any text editor, and edit configuration settings at the top.
+Simply drop index.php into any directory, and it will create a gallery of all files and a menu from the subfolders of the directory. For advanced configuration, open index.php in any text editor and edit configuration settings. Optionally, you can create a persistent external config file [[READ MORE](https://forum.photo.gallery/viewtopic.php?f=66&t=9964)]
 
 ### Newsletter
 
