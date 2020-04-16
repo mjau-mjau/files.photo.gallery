@@ -82,7 +82,7 @@ class config {
   // app vars
   static $assets;
   static $prod = true;
-  static $version = '0.1.0';
+  static $version = '0.1.1';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -126,7 +126,7 @@ class config {
     foreach ($items as $arr => $props) {
       $is_empty = empty($props['arr']);
       if(isset($props['hide']) && $props['hide']) continue;
-      foreach (['username', 'password'] as $prop) if(isset($props['arr'][$prop])) $props['arr'][$prop] = '***';
+      foreach (['username', 'password', 'allow_tasks'] as $prop) if(isset($props['arr'][$prop]) && !empty($props['arr'][$prop]) && is_string($props['arr'][$prop])) $props['arr'][$prop] = '***';
       $export = $is_empty ? 'array ()' : var_export($props['arr'], true);
       $comment = preg_replace('/\n/', " [" . count($props['arr']) . "]\n", $props['comment'], 1);
       $var = isset($props['var']) ? $props['var'] . ' = ' : 'return ';
@@ -645,7 +645,8 @@ function get_dirs($dir = false, &$arr = array(), $depth = 0) {
   // get dirs from files array if menu_load_all
   if(config::$config['menu_load_all']){
     $dirs = array();
-    foreach ($arr[root_relative($dir)]['files'] as $key => $val) {
+    // foreach ($arr[root_relative($dir)]['files'] as $key => $val) {
+    foreach (end($arr)['files'] as $key => $val) {
       if($val['filetype'] === 'dir') $dirs[] = root_absolute($val['path']);
     }
 
