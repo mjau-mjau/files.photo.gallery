@@ -82,7 +82,7 @@ class config {
   // app vars
   static $assets;
   static $prod = true;
-  static $version = '0.1.1';
+  static $version = '0.1.2';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -92,6 +92,7 @@ class config {
   static $image_resize_cache_direct;
   static $image_resize_dimensions_retina = false;
   static $dirs_hash = false;
+  static $local_config_file = '_filesconfig.php';
 
   // get config
   private function get_config($path) {
@@ -111,7 +112,7 @@ class config {
 
     // items
     $items = array(
-      ['arr' => $local_config, 'comment' => "// LOCAL CONFIG\n// _filesconfig.php"],
+      ['arr' => $local_config, 'comment' => "// LOCAL CONFIG\n// " . self::$local_config_file],
       ['arr' => $storage_config, 'comment' => "// STORAGE CONFIG\n// " . rtrim($storage_path ?: '', '\/') . '/config/config.php'],
       ['arr' => $user_invalid, 'comment' => "// INVALID PARAMS\n// The following custom parameters will be ignored as they are not valid:", 'var' => '$invalid', 'hide' => empty($user_invalid)],
       ['arr' => $user_duplicate, 'comment' => "// DUPLICATE DEFAULT PARAMS\n// The following custom parameters will have no effect as they are identical to defaults:", 'var' => '$duplicate', 'hide' => empty($user_duplicate)],
@@ -140,7 +141,7 @@ class config {
   function __construct($is_doc = false) {
 
     // local config
-    $local_config = self::get_config('./_filesconfig.php');
+    $local_config = self::get_config(self::$local_config_file);
 
     // storage config
     $storage_path = isset($local_config['storage_path']) ? $local_config['storage_path'] : self::$default['storage_path'];
@@ -413,14 +414,18 @@ function is_exclude($path = false, $is_dir = true){
   // exclude storage path
   if(config::$storage_path && is_within_path($path, config::$storage_path)) return true; 
 
-  // check root relative dir path
+  // dirs_exclude: check root relative dir path
   if(config::$config['dirs_exclude']) {
     $dirname = $is_dir ? $path : dirname($path);
     if($dirname !== config::$root && preg_match(config::$config['dirs_exclude'], substr($dirname, strlen(config::$root)))) return true;
   }
 
-  // file only: check basename
-  if(!$is_dir && config::$config['files_exclude'] && preg_match(config::$config['files_exclude'], basename($path))) return true;
+  // files_exclude: check vs basename
+  if(!$is_dir){
+    $basename = basename($path);
+    if($basename === config::$local_config_file) return true;
+    if(config::$config['files_exclude'] && preg_match(config::$config['files_exclude'], $basename)) return true;
+  }
 }
 
 // valid root path
