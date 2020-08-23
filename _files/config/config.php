@@ -1,5 +1,6 @@
 <?php 
 
+// CONFIG / https://forum.photo.gallery/viewtopic.php?f=66&t=9964
 // Uncomment the parameters you want to edit.
 return array (
   //'root' => '',
@@ -14,10 +15,11 @@ return array (
   //'image_resize_cache' => true,
   //'image_resize_dimensions' => 320,
   //'image_resize_dimensions_retina' => 480,
-  //'image_resize_quality' => 90,
+  //'image_resize_quality' => 85,
   //'image_resize_function' => 'imagecopyresampled',
-  //'image_resize_min_filesize' => 50000,
-  //'image_resize_max_filesize' => 10000000,
+  //'image_resize_sharpen' => true,
+  //'image_resize_memory_limit' => 128,
+  //'image_resize_max_pixels' => 30000000,
   //'image_resize_min_ratio' => 1.5,
   //'image_resize_cache_direct' => false,
   //'menu_enabled' => true,
@@ -26,6 +28,7 @@ return array (
   //'menu_sort' => 'name_asc',
   //'menu_cache_validate' => true,
   //'menu_load_all' => false,
+  //'menu_recursive_symlinks' => true,
   //'layout' => 'rows',
   //'image_cover' => true,
   //'sort' => 'name_asc',
@@ -35,6 +38,7 @@ return array (
   //'storage_path' => '_files',
   //'files_exclude' => '',
   //'dirs_exclude' => '',
+  //'allow_symlinks' => true,
   //'history' => true,
   //'breadcrumbs' => true,
   //'transitions' => true,
@@ -45,4 +49,8 @@ return array (
   //'topbar_sticky' => 'scroll',
   //'check_updates' => true,
   //'allow_tasks' => NULL,
+  //'get_mime_type' => false,
+  //'context_menu' => true,
+  //'prevent_right_click' => false,
+  //'license_key' => '',
 );

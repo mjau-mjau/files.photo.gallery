@@ -25,20 +25,19 @@ class config {
     // images
     'load_images' => true,
     'load_files_proxy_php' => false,
-    'load_images_max_filesize' => 1000000, // 1MB
+    'load_images_max_filesize' => 1000000, // maximum file size (bytes) for un-resized images loaded into list
     'load_svg_max_filesize' => 100000, // 100k
     'image_resize_enabled' => true,
     'image_resize_cache' => true, // todo: remove this option and just use 'cache?
     'image_resize_dimensions' => 320,
     'image_resize_dimensions_retina' => 480,
-    'image_resize_quality' => 90,
+    'image_resize_quality' => 85,
     'image_resize_function' => 'imagecopyresampled', // imagecopyresampled / imagecopyresized
-    'image_resize_min_filesize' => 50000,
-    'image_resize_max_filesize' => 10000000,
-    'image_resize_min_ratio' => 1.5,
+    'image_resize_sharpen' => true,
+    'image_resize_memory_limit' => 128, // 128 MB is suffient to resize images around 6000 px / 0 = ignore memory
+    'image_resize_max_pixels' => 30000000, // 30 MP equivalent to an image 6000 x 5000 / 0 = no limit
+    'image_resize_min_ratio' => 1.5, // min size diff original vs resize. Only resizes if ratio > min ratio
     'image_resize_cache_direct' => false, // if enabled and delete cache, must increase cache_key
-    //'image_resize_min_dimensions,
-    //'image_resize_max_dimensions,
 
     // menu
     'menu_enabled' => true,
@@ -47,6 +46,7 @@ class config {
     'menu_sort' => 'name_asc', // name_asc, name_desc, date_asc, date_desc
     'menu_cache_validate' => true,
     'menu_load_all' => false,
+    'menu_recursive_symlinks' => true, // List sub-directories of symlinks in the main menu. May cause menu loops and/or duplicate menu items
 
     // files layout
     'layout' => 'rows', // list, blocks, grid, rows, columns
@@ -62,6 +62,7 @@ class config {
     // exclude files directories regex
     'files_exclude' => '', // '/\.(pdf|jpe?g)$/i'
     'dirs_exclude' => '', //'/\/Convert|\/football|\/node_modules(\/|$)/i',
+    'allow_symlinks' => true, // allow symlinks
 
     // various
     'history' => true,
@@ -73,21 +74,29 @@ class config {
     'popup_interval' => 5000,
     'topbar_sticky' => 'scroll', // true, false, 'scroll'
     'check_updates' => true,
-    'allow_tasks' => null
+    'allow_tasks' => null,
+    'get_mime_type' => false, // get file mime type from server (slow) instead of from extension (fast)
+    'context_menu' => true, // disable context-menu button and right-click menu
+    'prevent_right_click' => false, // blocks browser right-click menu on sensitive items (images, list items, menu)
+    'license_key' => ''
   );
 
   // config (will popuplate)
   public static $config = array();
 
   // app vars
+  static $__dir__ = __DIR__;
+  static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.1.2';
+  static $version = '0.2.0';
   static $root;
   static $doc_root;
   static $has_login = false;
   static $storage_path;
   static $storage_is_within_doc_root = false;
+  static $storage_config_realpath;
+  static $storage_config;
   static $cache_path;
   static $image_resize_cache_direct;
   static $image_resize_dimensions_retina = false;
@@ -127,7 +136,7 @@ class config {
     foreach ($items as $arr => $props) {
       $is_empty = empty($props['arr']);
       if(isset($props['hide']) && $props['hide']) continue;
-      foreach (['username', 'password', 'allow_tasks'] as $prop) if(isset($props['arr'][$prop]) && !empty($props['arr'][$prop]) && is_string($props['arr'][$prop])) $props['arr'][$prop] = '***';
+      foreach (['username', 'password', 'allow_tasks', '__dir__', '__file__'] as $prop) if(isset($props['arr'][$prop]) && !empty($props['arr'][$prop]) && is_string($props['arr'][$prop])) $props['arr'][$prop] = '***';
       $export = $is_empty ? 'array ()' : var_export($props['arr'], true);
       $comment = preg_replace('/\n/', " [" . count($props['arr']) . "]\n", $props['comment'], 1);
       $var = isset($props['var']) ? $props['var'] . ' = ' : 'return ';
@@ -137,36 +146,53 @@ class config {
     exit;
   }
 
+
+
+
+  //public static function helloWorld() {
+  public static function save_config($config = array()){
+    $save_config = array_intersect_key(array_replace(self::$storage_config, $config), self::$default);
+    $export = preg_replace("/  '/", "  //'", var_export(array_replace(self::$default, $save_config), true));
+    foreach ($save_config as $key => $value) if($value !== self::$default[$key]) $export = str_replace("//'" . $key, "'" . $key, $export);
+    return @file_put_contents(config::$storage_config_realpath, '<?php ' . PHP_EOL . PHP_EOL . '// CONFIG / https://forum.photo.gallery/viewtopic.php?f=66&t=9964' . PHP_EOL . '// Uncomment the parameters you want to edit.' . PHP_EOL . 'return ' . $export . ';');
+  }
+
+
+
   // construct
   function __construct($is_doc = false) {
+
+    // normalize OS paths
+    self::$__dir__ = real_path(__DIR__);
+    self::$__file__ = real_path(__FILE__);
 
     // local config
     $local_config = self::get_config(self::$local_config_file);
 
     // storage config
     $storage_path = isset($local_config['storage_path']) ? $local_config['storage_path'] : self::$default['storage_path'];
-    $storage_realpath = !empty($storage_path) ? realpath($storage_path) : false;
-    if($is_doc) error($storage_realpath === __DIR__, 'storage_path must be a unique dir.');
-    $storage_config_realpath = $storage_realpath ? $storage_realpath . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'config.php' : false;
-    $storage_config = self::get_config($storage_config_realpath);
+    $storage_realpath = !empty($storage_path) ? real_path($storage_path) : false;
+    if($is_doc && $storage_realpath === self::$__dir__) error('<strong>storage_path must be a unique dir.</strong>');
+    self::$storage_config_realpath = $storage_realpath ? $storage_realpath . '/config/config.php' : false;
+    self::$storage_config = self::get_config(self::$storage_config_realpath);
 
     // config
-    $user_config = array_replace($storage_config, $local_config);
+    $user_config = array_replace(self::$storage_config, $local_config);
     $user_valid = array_intersect_key($user_config, self::$default);
     self::$config = array_replace(self::$default, $user_valid);
 
     // dump config and exit;
-    if(isset($_GET['config'])) self::dump_config($local_config, $storage_path, $storage_config, $user_config, $user_valid);
+    if(isset($_GET['config'])) self::dump_config($local_config, $storage_path, self::$storage_config, $user_config, $user_valid);
 
     // CDN assets
     self::$assets = self::$prod ? 'https://cdn.jsdelivr.net/npm/files.photo.gallery@' . self::$version . '/' : '';
 
     // root
-    self::$root = realpath(self::$config['root']);
-    if($is_doc) error(!self::$root, 'root dir "' . self::$config['root'] . '" does not exist.');
+    self::$root = real_path(self::$config['root']);
+    if($is_doc && !self::$root) error('root dir "' . self::$config['root'] . '" does not exist.');
 
     // doc root
-    self::$doc_root = $_SERVER['DOCUMENT_ROOT'];
+    self::$doc_root = real_path($_SERVER['DOCUMENT_ROOT']);
 
     // login
     self::$has_login = self::$config['username'] || self::$config['password'] ? true : false;
@@ -179,11 +205,11 @@ class config {
 
       // create storage_path
       if(empty($storage_realpath)){
-        $storage_path = is_string($storage_path) ? rtrim($storage_path, '/') : false;
-        error(empty($storage_path), 'Invalid storage_path parameter.');
+        $storage_path = is_string($storage_path) ? rtrim($storage_path, '\/') : false;
+        if(empty($storage_path)) error('Invalid storage_path parameter.');
         mkdir_or_error($storage_path);
-        $storage_realpath = realpath($storage_path);
-        error(empty($storage_realpath), 'storage_path "' . $storage_path . '"" does not exist and can\'t be created.');
+        $storage_realpath = real_path($storage_path);
+        if(empty($storage_realpath)) error("storage_path <strong>$storage_path</strong> does not exist and can't be created.");
       }
       self::$storage_path = $storage_realpath;
 
@@ -191,26 +217,17 @@ class config {
       if(is_within_docroot(self::$storage_path)) self::$storage_is_within_doc_root = true;
 
       // cache_path real path
-      self::$cache_path = self::$storage_path . DIRECTORY_SEPARATOR . 'cache';
+      self::$cache_path = self::$storage_path . '/cache';
 
       // create cache dirs
       if($is_doc){
         $dirs = $image_cache ? ['images'] : [];
         if(self::$config['cache']) array_push($dirs, 'folders', 'menu');
-        foreach($dirs as $dir) mkdir_or_error(self::$cache_path . DIRECTORY_SEPARATOR . $dir);
+        foreach($dirs as $dir) mkdir_or_error(self::$cache_path . '/' . $dir);
       }
 
-      // create config file with all parameters commented out.
-      if($is_doc && empty($storage_config)){
-        $config_dir = self::$storage_path . DIRECTORY_SEPARATOR . 'config';
-        $config_file = $config_dir . DIRECTORY_SEPARATOR . 'config.php';
-        if(!file_exists($config_file)){
-          mkdir_or_error($config_dir);
-          $export = preg_replace("/  '/", "  //'", var_export(self::$default, true));
-          $code = '<?php ' . PHP_EOL . PHP_EOL . '// Uncomment the parameters you want to edit.' . PHP_EOL . 'return ' . $export . ';';
-          file_put_contents($config_file, $code);
-        } 
-      }
+      // create/update config file, with default parameters commented out.
+      if($is_doc && self::$storage_config_realpath && (!file_exists(self::$storage_config_realpath) || filemtime(self::$storage_config_realpath) < filemtime(__FILE__))) self::save_config();  
 
       // image resize cache direct
       if(self::$config['image_resize_cache_direct'] && !self::$has_login && self::$config['load_images'] && self::$config['image_resize_cache'] && self::$config['image_resize_enabled'] && self::$storage_is_within_doc_root) self::$image_resize_cache_direct = true;
@@ -220,9 +237,10 @@ class config {
     if(self::$config['image_resize_dimensions_retina'] && self::$config['image_resize_dimensions_retina'] > self::$config['image_resize_dimensions']) self::$image_resize_dimensions_retina = self::$config['image_resize_dimensions_retina'];
 
     // dirs hash
-    self::$dirs_hash = substr(md5(self::$doc_root . __DIR__ . self::$root . self::$version .  self::$config['cache_key'] . self::$image_resize_cache_direct . self::$config['files_exclude'] . self::$config['dirs_exclude']), 0, 6);
+    self::$dirs_hash = substr(md5(self::$doc_root . self::$__dir__ . self::$root . self::$version .  self::$config['cache_key'] . self::$image_resize_cache_direct . self::$config['files_exclude'] . self::$config['dirs_exclude']), 0, 6);
 
     // login
+    // $is_doc
     if(self::$has_login) check_login($is_doc);
   }
 };
@@ -234,7 +252,7 @@ function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
 <html>
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, maximum-scale=1.0, user-scalable=0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no, shrink-to-fit=no">
     <meta name="robots" content="noindex,nofollow">
     <title>Login</title>
     <link href="<?php echo config::$assets ?>css/files.css" rel="stylesheet">
@@ -243,7 +261,7 @@ function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
   <body><div id="files-login-container"></div></body>
   <script>
     document.getElementById('files-login-container').innerHTML = '\
-    <h1 class="header login-header">Login</h1>\
+    <h1 class="header mb-5">Login</h1>\
     <?php if($is_login_attempt && $_POST['sidx'] !== $sidx) { ?><div class="alert alert-danger" role="alert"><strong>PHP session ID mismatch</strong><br>If the error persists, your PHP is incorrectly creating new session ID for each request.</div><?php } else if($is_login_attempt) { ?>\
     <div class="alert alert-danger" role="alert">Incorrect login!</div><?php } else if($is_logout) { ?>\
     <div class="alert alert-warning" role="alert">You are now logged out.</div><?php } ?>\
@@ -252,12 +270,8 @@ function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
         <input type="text" name="username" placeholder="Username">\
         <input type="password" name="password" placeholder="Password">\
       </div>\
-      <div class="form-group">\
-        <input type="text" name="fusername" class="form-control form-control-lg" placeholder="Username" required autofocus>\
-      </div>\
-      <div class="form-group">\
-        <input type="password" name="fpassword" class="form-control form-control-lg" placeholder="Password" required>\
-      </div>\
+        <input type="text" name="fusername" class="form-control form-control-lg mb-3" placeholder="Username" required autofocus>\
+        <input type="password" name="fpassword" class="form-control form-control-lg mb-3" placeholder="Password" required>\
       <input type="hidden" name="client_hash" value="<?php echo $client_hash; ?>">\
       <input type="hidden" name="sidx" value="<?php echo $sidx; ?>">\
       <input type="submit" value="login" class="btn btn-lg btn-primary btn-block">\
@@ -273,13 +287,13 @@ function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
 
 // check login
 function check_login($is_doc){
-  if($is_doc) foreach (['username', 'password'] as $val) error(empty(config::$config[$val]), $val . ' cannot be empty.');
-  error(!session_start() && $is_doc, 'Failed to initiate PHP session_start();');
+  if($is_doc) foreach (['username', 'password'] as $val) if(empty(config::$config[$val])) error($val . ' cannot be empty.');
+  if(!session_start() && $is_doc) error('Failed to initiate PHP session_start();', 500);
   function get_client_hash(){
     foreach(array('HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR') as $key){
       if(isset($_SERVER[$key]) && !empty($_SERVER[$key]) && filter_var($_SERVER[$key], FILTER_VALIDATE_IP)) return md5($_SERVER[$key] . $_SERVER['HTTP_USER_AGENT'] . __FILE__ . $_SERVER['HTTP_HOST']);
     }
-    exit('Invalid IP');
+    error('Invalid IP', 401);
   }
 
   // hash
@@ -304,7 +318,7 @@ function check_login($is_doc){
       // correct login set $_SESSION['login']
       if($is_login_attempt &&
         trim($_POST['fusername']) == config::$config['username'] && 
-        (strlen(config::$config['password']) === 60 ? password_verify(trim($_POST['fpassword']), config::$config['password']) : (trim($_POST['fpassword']) == config::$config['password'])) && 
+        (phpversion() >= 5.5 && !password_needs_rehash(config::$config['password'], PASSWORD_DEFAULT) ? password_verify(trim($_POST['fpassword']), config::$config['password']) : (trim($_POST['fpassword']) == config::$config['password'])) && 
         $_POST['client_hash'] === $client_hash && 
         $_POST['sidx'] === $sidx
       ){
@@ -320,23 +334,27 @@ function check_login($is_doc){
       json_error('login');
 
     } else {
-      exit('You are not logged in.');
+      error('You are not logged in.', 401);
     }
   }
 }
 
 //
 function mkdir_or_error($path){
-  if(!file_exists($path)) error(!mkdir($path, 0777, true), 'Failed to create ' . $path);
+  if(!file_exists($path) && !mkdir($path, 0777, true)) error('Failed to create ' . $path, 500);
+}
+function real_path($path){
+  $real_path = realpath($path);
+  return $real_path ? str_replace('\\', '/', $real_path) : false;
 }
 function root_relative($dir){
-  return ltrim(substr($dir, strlen(config::$root)), DIRECTORY_SEPARATOR);
+  return ltrim(substr($dir, strlen(config::$root)), '\/');
 }
 function root_absolute($dir){
-  return config::$root . ($dir ? DIRECTORY_SEPARATOR . $dir : '');
+  return config::$root . ($dir ? '/' . $dir : '');
 }
 function is_within_path($path, $root){
-  return strpos($path . DIRECTORY_SEPARATOR, $root . DIRECTORY_SEPARATOR) === 0;
+  return strpos($path . '/', $root . '/') === 0;
 }
 function is_within_root($path){
   return is_within_path($path, config::$root);
@@ -345,7 +363,7 @@ function is_within_docroot($path){
   return is_within_path($path, config::$doc_root);
 }
 function get_folders_cache_path($name){
-  return config::$cache_path . DIRECTORY_SEPARATOR . 'folders' . DIRECTORY_SEPARATOR . $name . '.json';
+  return config::$cache_path . '/folders/' . $name . '.json';
 }
 function get_json_cache_url($name){
   $file = get_folders_cache_path($name);
@@ -358,23 +376,21 @@ function get_dir_cache_path($dir, $mtime = false){
 function get_dir_cache_hash($dir, $mtime = false){
   return config::$dirs_hash . '.' . substr(md5($dir), 0, 6) . '.' . ($mtime ?: filemtime($dir));
 }
-function header_time(){
-  $prop = version_compare(PHP_VERSION, '5.4.0') >= 0 ? 'REQUEST_TIME_FLOAT' : 'REQUEST_TIME';
-  header('files-output-time: ' . (microtime(true) - $_SERVER[$prop]) . ' seconds.');
+function header_memory_time(){
+  return (isset($_SERVER['REQUEST_TIME_FLOAT']) ? round(microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'], 3) . 's, ' : '') . round(memory_get_peak_usage() / 1048576, 1) . 'M';
 }
 
 // read file
 // todo: add files-date header
-function read_file($path, $mime = 'image/jpeg', $msg = false, $cache_headers = false){
+function read_file($path, $mime = 'image/jpeg', $msg = false, $props = false, $cache_headers = false){
   if(!$path || !file_exists($path)) return false;
   if($mime == 'image/svg') $mime .= '+xml';
   header('content-type: ' . $mime);
 	header('content-length: ' . filesize($path));
   header('content-disposition: filename="' . basename($path) . '"');
-  header_time();
-  if($msg) header('files-msg: ' . $msg);
+  if($msg) header('files-msg: ' . $msg . ' [' . ($props ? $props . ', ' : '') . header_memory_time() . ']');
   if($cache_headers) set_cache_headers();
-  if(!readfile($path)) exit('Failed to read file ' . $path . '.');
+  if(!is_readable($path) || !readfile($path)) error('Failed to read file ' . $path . '.', 400);
   exit;
 }
 
@@ -383,7 +399,7 @@ function get_mime($path){
   if(function_exists('mime_content_type')){
     return mime_content_type($path);
   } else {
-    return function_exists('finfo_file') ? @finfo_file(finfo_open(FILEINFO_MIME_TYPE), $path) : false;
+    return function_exists('finfo_file') ? finfo_file(finfo_open(FILEINFO_MIME_TYPE), $path) : false;
   }
 }
 
@@ -399,17 +415,20 @@ function set_cache_headers(){
 
 // get image cache path
 function get_image_cache_path($path, $image_resize_dimensions, $filesize, $filemtime){
-  return config::$cache_path . DIRECTORY_SEPARATOR . 'images' . DIRECTORY_SEPARATOR . substr(md5($path), 0, 6) . '.' . $filesize . '.' . $filemtime . '.' . $image_resize_dimensions . '.jpg';
+  return config::$cache_path . '/images/' . substr(md5($path), 0, 6) . '.' . $filesize . '.' . $filemtime . '.' . $image_resize_dimensions . '.jpg';
 }
 
 // is excluded
-function is_exclude($path = false, $is_dir = true){
+function is_exclude($path = false, $is_dir = true, $symlinked = false){
 
   // early exit
   if(!$path || $path === config::$root) return;
 
   // exclude files PHP application
-  if($path === __FILE__) return true;
+  if($path === config::$__file__) return true;
+
+  // symlinks not allowed
+  if($symlinked && !config::$config['allow_symlinks']) return true; 
 
   // exclude storage path
   if(config::$storage_path && is_within_path($path, config::$storage_path)) return true; 
@@ -430,15 +449,34 @@ function is_exclude($path = false, $is_dir = true){
 
 // valid root path
 function valid_root_path($path, $is_dir = false){
+
+  // invalid
   if($path === false) return;
   if(!$is_dir && empty($path)) return; // path cannot be empty if file
-  $path = root_absolute($path); // get absolute
-  if($path !== realpath($path)) return; // path does not exist or does not match realpath
-  if(!is_readable($path)) return; // not readable
-  if($is_dir && !is_dir($path)) return; // dir check
-  if(!$is_dir && !is_file($path)) return; // file check
-  if(is_exclude($path, $is_dir)) return; // exclude path
-  return $path;
+  if($path && substr($path, -1) == '/') return; // path should never be root absolute or end with /
+
+  // absolute path may differ if path contains symlink
+  $root_absolute = root_absolute($path);
+  $real_path = real_path($root_absolute);
+
+  // file does not exist
+  if(!$real_path) return;
+
+  // security checks if path contains symlink
+  if($root_absolute !== $real_path) {
+    if(strpos(($is_dir ? $path : dirname($path)), ':') !== false) return; // dir may not contain ':'
+    if(strpos($path, '..') !== false) return; // path may not contain '..'
+    if(is_exclude($root_absolute, $is_dir, true)) return;
+  }
+
+  // nope
+  if(!is_readable($real_path)) return; // not readable
+  if($is_dir && !is_dir($real_path)) return; // dir check
+  if(!$is_dir && !is_file($real_path)) return; // file check
+  if(is_exclude($real_path, $is_dir)) return; // exclude path
+
+  // return root_absolute
+  return $root_absolute;
 }
 
 // image create from
@@ -461,121 +499,151 @@ function image_create_from($path, $type){
 function get_file($path, $resize = false){
 
   // validate
-  error(!$path, 'Invalid file request.');
+  if(!$path) error('Invalid file request.', 404);
+  $path = real_path($path); // in case of symlink path
 
   // mime
   $mime = get_mime($path);
-  if(!$mime) exit('empty mime type');
+  if(!$mime) error('Empty mime type.', 415);
   $mime_array = explode('/', $mime);
 
   // resize
   if($resize){
-    if($mime_array[0] !== 'image') exit(basename($path) . ' [' . $mime . '] is not an image.'); // exit if not image
-    if(!config::$config['load_images']) exit('Load images disabled.');
-    if(!config::$config['image_resize_enabled']) exit('Resize images disabled.');
+    if($mime_array[0] !== 'image') error('<strong>' . basename($path) . '</strong> (' . $mime . ') is not an image.', 415);
+    if(!config::$config['load_images']) error('Load images disabled.', 400);
+    if(!config::$config['image_resize_enabled']) error('Resize images disabled.', 400);
     $resize_dimensions = intval($resize);
-    if(!$resize_dimensions) exit("Invalid resize parameter [$resize]");
-    //if($resize_dimensions !== config::image_resize_dimensions && $resize_dimensions !== config::$image_resize_dimensions_retina) exit("Resize [$resize_dimensions] is not allowed.");
-    if(!in_array($resize_dimensions, [config::$config['image_resize_dimensions'], config::$image_resize_dimensions_retina])) exit("Resize [$resize_dimensions] is not allowed.");
+    if(!$resize_dimensions) error("Invalid resize parameter <strong>$resize</strong>.", 400);
+    if(!in_array($resize_dimensions, [config::$config['image_resize_dimensions'], config::$image_resize_dimensions_retina])) error("Resize parameter <strong>$resize_dimensions</strong> is not allowed.", 400);
     resize_image($path, $resize_dimensions);
 
   // proxy file
   } else {
 
-    // disable if path is within document root and !proxy (should never proxy)
-    if(is_within_docroot($path) && !config::$config['load_files_proxy_php']) exit('File cannot be proxied.');
+    // disable if !proxy and path is within document root (file should never be proxied)
+    if(!config::$config['load_files_proxy_php'] && is_within_docroot($path)) error('File cannot be proxied.', 400);
 
     // read file
-    read_file($path, $mime, $msg = 'File ' . basename($path) . ' proxied.', true);
+    read_file($path, $mime, $msg = 'File ' . basename($path) . ' proxied.', false, true);
   }
 }
 
-// https://www.php.net/manual/en/function.imagecopyresampled.php#112742
-function resize_image($path, $resize_dimensions){
+// sharpen resized image
+function sharpen_image($image){
+  $matrix = array(
+    array(-1, -1, -1),
+    array(-1, 20, -1),
+    array(-1, -1, -1),
+  );
+  $divisor = array_sum(array_map('array_sum', $matrix));
+  $offset = 0; 
+  imageconvolution($image, $matrix, $divisor, $offset);
+}
   
-  // throw error image
-    // memory limit errors
-  // font as image https://www.php.net/manual/en/function.imagettftext.php
-  // rotate from exif?
-    // orientation https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
+// resize image
+function resize_image($path, $resize_dimensions){
 
-  // cached
+  // file size
   $file_size = filesize($path);
 
-  // some headers
-  $header = "[resize-dimensions: $resize_dimensions][resize-quality: " . config::$config['image_resize_quality'] . "][resize-function: " . config::$config['image_resize_function'] . "][resize-cache: " . (config::$config['image_resize_cache'] ? 'true' : 'false') . "]";
+  // header props
+  $header_props = 'w:' . $resize_dimensions . ', q:' . config::$config['image_resize_quality'] . ', ' . config::$config['image_resize_function'] . ', cache:' . (config::$config['image_resize_cache'] ? '1' : '0');
 
   // cache
   $cache = config::$config['image_resize_cache'] ? get_image_cache_path($path, $resize_dimensions, $file_size, filemtime($path)) : NULL;
-  if($cache) read_file($cache, null, 'Resized image served from cache ' . $header, true);
-
-  // limits
-  // hmm, maybe just pass through image if < config::image_resize_min_filesize
-  if($file_size < config::$config['image_resize_min_filesize']) exit('File size [' . $file_size . '] is smaller than image_resize_min_filesize [' . config::$config['image_resize_min_filesize'] . ']');
-  if($file_size > config::$config['image_resize_max_filesize']) exit('File size [' . $file_size . '] exceeds image_resize_max_filesize [' . config::$config['image_resize_max_filesize'] . ']');
+  if($cache) read_file($cache, null, 'Resized image served from cache', $header_props, true);
 
   // imagesize
   $info = getimagesize($path);
-  if(empty($info)) exit('invalid image [getimagesize]'); // not valid image
-  $original_width = $info[0];
-  $original_height = $info[1];
-  $type = $info[2];
-  $mime = $info['mime'];
+  if(empty($info) || !is_array($info)) error('Invalid image / failed getimagesize().', 500);
+  $resize_ratio = max($info[0], $info[1]) / $resize_dimensions;
 
-  // get resize ratio from long side
-  $ratio = max($original_width, $original_height) / $resize_dimensions;
+  // image_resize_max_pixels early exit
+  if(config::$config['image_resize_max_pixels'] && $info[0] * $info[1] > config::$config['image_resize_max_pixels']) error('Image resolution <strong>' . $info[0] . ' x ' . $info[1] . '</strong> (' . ($info[0] * $info[1]) . ' px) exceeds <strong>image_resize_max_pixels</strong> (' . config::$config['image_resize_max_pixels'] . ' px).', 400);
 
-  // some headers
-  $header .= "[mime: $mime][original-width: $original_width][original-height: $original_height][resize-ratio: $ratio]";
+  // header props
+  $header_props .= ', ' . $info['mime'] . ', ' . $info[0] . 'x' . $info[1] . ', ratio:' . round($resize_ratio, 2);
 
   // output original if resize ratio < image_resize_min_ratio
-  if($ratio < config::$config['image_resize_min_ratio'] && !read_file($path, $mime, 'Original image served ' . $header, true)) exit('File ' . $path . ' does not exist.');
+  if($resize_ratio < max(config::$config['image_resize_min_ratio'], 1) && !read_file($path, $info['mime'], 'Original image served', $header_props, true)) error('File does not exist.', 404);
 
   // Calculate new image dimensions.
-  $new_width  = round($original_width / $ratio);
-  $new_height = round($original_height / $ratio);
+  $resize_width  = round($info[0] / $resize_ratio);
+  $resize_height = round($info[1] / $resize_ratio);
 
-  // some headers
-  $header .= "[resize-width: $new_width][resize-height: $new_height]";
+  // memory
+  $memory_limit = config::$config['image_resize_memory_limit'] && function_exists('ini_get') ? (int) @ini_get('memory_limit') : false;
+  if($memory_limit && $memory_limit > -1){
+    // $memory_required = ceil(($info[0] * $info[1] * 4 + $resize_width * $resize_height * 4) / 1048576);
+    $memory_required = round(($info[0] * $info[1] * (isset($info['bits']) ? $info['bits'] / 8 : 1) * (isset($info['channels']) ? $info['channels'] : 3) * 1.33 + $resize_width * $resize_height * 4) / 1048576, 1);
+    $new_memory_limit = function_exists('ini_set') ? max($memory_limit, config::$config['image_resize_memory_limit']) : $memory_limit;
+    if($memory_required > $new_memory_limit) error('Resizing this image requires at least <strong>' . $memory_required . 'M</strong>. Your current PHP memory_limit is <strong>' . $new_memory_limit .'M</strong>.', 400);
+    if($memory_limit < $new_memory_limit && @ini_set('memory_limit', $new_memory_limit . 'M')) $header_props .= ', ' . $memory_limit . 'M => ' . $new_memory_limit . 'M (min ' . $memory_required . 'M)';
+  }
+
+  // new dimensions headers
+  $header_props .= ', ' . $resize_width . 'x' . $resize_height;
 
   // create new $image
-  $image = image_create_from($path, $type);
-  if(!$image) exit("Failed to create image from resource [path: $path][type: $type]"); 
+  $image = image_create_from($path, $info[2]);
+  if(!$image) error('Failed to create image resource.', 500);
 
   // Create final image with new dimensions.
-  $new_image = imagecreatetruecolor($new_width, $new_height);
-  call_user_func(config::$config['image_resize_function'], $new_image, $image, 0, 0, 0, 0, $new_width, $new_height, $original_width, $original_height);
+  $new_image = imagecreatetruecolor($resize_width, $resize_height);
+  if(!call_user_func(config::$config['image_resize_function'], $new_image, $image, 0, 0, 0, 0, $resize_width, $resize_height, $info[0], $info[1])) error('Failed to resize image.', 500);
 
-  // cache
+  // destroy original $image resource
+  imagedestroy($image);
+
+  // exif orientation
+  // https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
+  if(function_exists('exif_read_data')){
+    $exif = @exif_read_data($path);
+    if(!empty($exif) && is_array($exif) && isset($exif['Orientation'])) {
+      $orientation = $exif['Orientation'];
+      if(!empty($orientation) && is_numeric($orientation) && $orientation > 1 && $orientation < 9) {
+        if($orientation === 6 || $orientation === 5){
+          $new_image = imagerotate($new_image, 270, null);
+        } elseif ($orientation === 3 || $orientation === 4){
+          $new_image = imagerotate($new_image, 180, null);
+        } elseif ($orientation === 8 || $orientation === 7){
+          $new_image = imagerotate($new_image, 90, null);
+        }
+        if(in_array($orientation, array(5, 4, 7)) && function_exists('imageflip')) imageflip($new_image, IMG_FLIP_HORIZONTAL);
+        $header_props .= ', orientated from EXIF:' . $orientation;
+      }
+    }
+  }
+
+  // sharpen resized image
+  if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
+
+  // save to cache
   if($cache){
-    if(!imagejpeg($new_image, $cache, config::$config['image_resize_quality'])) exit('Failed to create and cache resized JPG.');
+    if(!imagejpeg($new_image, $cache, config::$config['image_resize_quality'])) error('<strong>imagejpeg()</strong> failed to create and cache resized image.', 500);
     /* // store cache records in /images.json_decode(json)n
-    $image_cache_path = config::$cache_path . DIRECTORY_SEPARATOR . 'images';
-    $image_cache_json = $image_cache_path . DIRECTORY_SEPARATOR . 'images.json';
+    $image_cache_path = config::$cache_path . '/images';
+    $image_cache_json = $image_cache_path . '/images.json';
     $image_cache_arr = file_exists($image_cache_json) ? json_decode(file_get_contents($image_cache_json), true) : array();
-    $image_cache_arr[basename($cache)] = is_within_docroot($path) ? ltrim(substr($path, strlen(config::$doc_root)), DIRECTORY_SEPARATOR) : $path;
+    $image_cache_arr[basename($cache)] = is_within_docroot($path) ? ltrim(substr($path, strlen(config::$doc_root)), '\/') : $path;
     file_put_contents($image_cache_json, json_encode($image_cache_arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));*/
-    if(!read_file($cache, null, 'Resized image cached and served ' . $header, true)) exit('Cache file does not exist.');
 
-  // not cache
+  // not cache / direct output
   } else {
     set_cache_headers();
     header('content-type: image/jpeg');
-    header('files-msg: Resized image served ' . $header);
-    header_time();
-    imagejpeg($new_image, null, config::$config['image_resize_quality']);
+    header('files-msg: Resized image served [' . $header_props . ', ' . header_memory_time() . ']');
+    if(!imagejpeg($new_image, null, config::$config['image_resize_quality'])) error('<strong>imagejpeg()</strong> failed to create and output resized image.', 500);
   }
 
-  // destroy
+  // destroy image
   imagedestroy($new_image);
-  
-  /*
-  errors
-  auto-max resize from memory
-  */
 
-  // success
-  // return false;
+  // cache readfile
+  if($cache && !read_file($cache, null, 'Resized image cached and served', $header_props, true)) error('Cache file does not exist.', 404);
+
+  //
+  exit;
   // https://github.com/maxim/smart_resize_image/blob/master/smart_resize_image.function.php
   // https://github.com/gavmck/resize/blob/master/php/lib/resize-class.php
   // https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
@@ -585,37 +653,51 @@ function resize_image($path, $resize_dimensions){
 function get_url_path($dir){
   if(!is_within_docroot($dir)) return false;
 
-  // if in __DIR__ path, __DIR__ relative
-  if(is_within_path($dir, __DIR__)) return $dir === __DIR__ ? '.' : substr($dir, strlen(__DIR__) + 1);
+  // if in __dir__ path, __dir__ relative
+  if(is_within_path($dir, config::$__dir__)) return $dir === config::$__dir__ ? '.' : substr($dir, strlen(config::$__dir__) + 1);
 
   // doc root, doc root relative
   return $dir === config::$doc_root ? '/' : substr($dir, strlen(config::$doc_root));
 }
 
-//
-function get_dir($dir, $files = false, $json_url = false){
+// get dir
+function get_dir($path, $files = false, $json_url = false){
 
-  // todo: dir recursive filesize?
-  $filemtime = filemtime($dir);
+  // realpath
+  $realpath = $path ? real_path($path) : false;
+  if(!$realpath) return; // no real path for any reason
+  $symlinked = $realpath !== $path; // path is symlinked at some point
+
+  // exclude
+  if(is_exclude($path, true, $symlinked)) return; // exclude
+  if($symlinked && is_exclude($realpath, true, $symlinked)) return; // exclude check again symlink realpath
+
+  // vars
+  $filemtime = filemtime($realpath);
+  $url_path = get_url_path($realpath) ?: ($symlinked ? get_url_path($path) : false);
 
   // array
   $arr = array(
-    'basename' => $dir === config::$root ? '' : basename($dir),
-    'fileperms' => substr(sprintf('%o', fileperms($dir)), -4),
+    'basename' => basename($realpath) ?: basename($path) ?: '',
+    'fileperms' => substr(sprintf('%o', fileperms($realpath)), -4),
     'filetype' => 'dir',
-    'is_writeable' => is_writeable($dir),
+    'is_writeable' => is_writeable($realpath),
+    'is_readable' => is_readable($realpath),
+    'is_link' => $symlinked ? is_link($path) : false,
     'mime' => 'directory',
     'mtime' => $filemtime,
-    'path' => root_relative($dir),
-    'url_path' => get_url_path($dir)
+    'path' => root_relative($path)
   );
 
+  // url path
+  if($url_path) $arr['url_path'] = $url_path;
+
 	// $files || config::menu_load_all
-  if($files) $arr['files'] = get_files_data($dir, $arr['url_path'], $arr['dirsize'], $arr['files_count'], $arr['images_count']);
+  if($files) $arr['files'] = get_files_data($path, $url_path, $arr['dirsize'], $arr['files_count'], $arr['images_count']);
 
 	// json cache path
   if($json_url && config::$storage_is_within_doc_root && !config::$has_login && config::$config['cache']){
-    $json_cache = get_json_cache_url(get_dir_cache_hash($dir, $filemtime));
+    $json_cache = get_json_cache_url(get_dir_cache_hash($realpath, $filemtime));
     if($json_cache) $arr['json_cache'] = $json_cache;
   }
 
@@ -630,53 +712,40 @@ function get_menu_sort($dirs){
       return filemtime($a) - filemtime($b); 
     });
   } else {
+    /*usort($dirs, function($a, $b) {
+      return strnatcasecmp(basename(real_path($a)), basename(real_path($b)));
+    });*/
     natcasesort($dirs);
   }
   return substr(config::$config['menu_sort'], -4) === 'desc' ? array_reverse($dirs) : $dirs;
 }
 
 // recursive directory scan
-function get_dirs($dir = false, &$arr = array(), $depth = 0) {
+function get_dirs($path = false, &$arr = array(), $depth = 0) {
 
-  // exclude
-  if($depth && is_exclude($dir)) return;
+  // get this dir (ignore root, unless load all ... root already loaded into page)
+  if($depth || config::$config['menu_load_all']) {
+    $data = get_dir($path, config::$config['menu_load_all'], !config::$config['menu_load_all']);
+    if(!$data) return $arr;
+    $arr[] = $data;
 
-  // get dir (ignore root, unless load all ... root already loaded into page)
-  if($depth || config::$config['menu_load_all']) $arr[] = get_dir($dir, config::$config['menu_load_all'], !config::$config['menu_load_all']);
+    // max depth
+    if(config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return $arr;
 
-  // max depth
-	if(config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return;
-
-  // get dirs from files array if menu_load_all
-  if(config::$config['menu_load_all']){
-    $dirs = array();
-    // foreach ($arr[root_relative($dir)]['files'] as $key => $val) {
-    foreach (end($arr)['files'] as $key => $val) {
-      if($val['filetype'] === 'dir') $dirs[] = root_absolute($val['path']);
-    }
-
-  // glob subdirs
-  } else {
-    $dirs = glob($dir . '/*', GLOB_NOSORT|GLOB_ONLYDIR);
+    // don't recursive if symlink
+    if($data['is_link'] && !config::$config['menu_recursive_symlinks']) return $arr;
   }
 
-  // sort and loop
-  if(!empty($dirs)) foreach(get_menu_sort($dirs) as $dir) get_dirs($dir, $arr, $depth + 1);
+  // get dirs from files array if $data['files'] or glob subdirs
+  $subdirs = isset($data['files']) ? array_filter(array_map(function($file){
+    return $file['filetype'] === 'dir' ? root_absolute($file['path']) : false;
+  }, $data['files'])) : glob($path . '/*', GLOB_NOSORT|GLOB_ONLYDIR);
 
-  //
+  // sort and loop subdirs
+  if(!empty($subdirs)) foreach(get_menu_sort($subdirs) as $subdir) get_dirs($subdir, $arr, $depth + 1);
+
+  // return
   return $arr;
-}
-
-// get image data
-function get_image_data($image_size){
-	if(!$image_size) return array('corrupt' => true);
-	$items = array(0 => 'width', 1 => 'height', 2 => 'type', 'bits' => 'bits', 'channels' => 'channels', 'mime' => 'mime');
-	$image_data = array();
-	foreach ($items as $id => $name) {
-		if(!isset($image_size[$id])) continue;
-		$image_data[$name] = $image_size[$id];
-	}
-	return empty($image_data) ? array('corrupt' => true) : $image_data;
 }
 
 function safe_iptc_tag($val, $max_str = 1000){
@@ -706,16 +775,17 @@ function get_iptc($image_info){
 	return $iptc;
 }
 
+// get exif
 function get_exif($path){
-	$exif_data = @exif_read_data($path, 'ANY_TAG', 0);
-	if(!$exif_data) return;
+  if(!function_exists('exif_read_data')) return;
+	$exif_data = @exif_read_data($path, 'ANY_TAG', 0); // @exif_read_data($path);
+  if(empty($exif_data) || !is_array($exif_data)) return;
 	$exif = array();
 	foreach (array('DateTime', 'DateTimeOriginal', 'ExposureTime', 'FNumber', 'FocalLength', 'Make', 'Model', 'Orientation', 'ISOSpeedRatings', 'Software') as $name) {
-		if(isset($exif_data[$name])) {
-			$value = trim($exif_data[$name]);
-			$exif[$name] = $name === 'DateTime' || $name === 'DateTimeOriginal' ? @strtotime($value) : $value;
-		}
+    if(isset($exif_data[$name])) $exif[$name] = trim($exif_data[$name]);
 	}
+  if(isset($exif['DateTime'])) $exif['DateTime'] = @strtotime($exif['DateTime']);
+  if(isset($exif['DateTimeOriginal'])) $exif['DateTimeOriginal'] = @strtotime($exif['DateTimeOriginal']);
 
 	/*LensInfo	24-70mm f/?
 	Lens	EF24-70mm f/2.8L USM
@@ -772,105 +842,172 @@ function gps2Num($coordPart){
   return floatval($parts[0]) / floatval($parts[1]);
 }
 
-//
+// 
 function get_files_data($dir, $url_path = false, &$dirsize = 0, &$files_count = 0, &$images_count = 0){
-	$paths = glob($dir . '/*', GLOB_NOSORT);
-	if(empty($paths)) return array();
+
+  // scandir
+  $filenames = scandir($dir, SCANDIR_SORT_NONE);
+  if(empty($filenames)) return array();
   $items = array();
 
-  // loop paths
-	foreach($paths as $path) {
+  // loop filenames
+  foreach($filenames as $filename) {
+
+    //
+    if($filename === '.' || $filename === '..') continue;
+    $path = $dir . '/' . $filename;
+
+    // paths
+    $realpath = real_path($path); // differs from $path only if is symlinked
+    if(!$realpath) continue; // no real path for any reason, for example symlink dead
+    $symlinked = $realpath !== $path; // path is symlinked at some point
 
     // filetype
-    $filetype = filetype($path);
+    $filetype = filetype($realpath);
     $is_dir = $filetype === 'dir' ? true : false;
-    if(!$is_dir) $files_count ++;
-
-    // dirs // files // images
-
+    
     // exclude
-    if(is_exclude($path, $is_dir)) continue;
+    if(is_exclude($path, $is_dir, $symlinked)) continue; // exclude
+    if($symlinked && is_exclude($realpath, $is_dir, $symlinked)) continue; // exclude check again symlink realpath
 
     // vars
-    $basename = basename($path);
-    $filemtime = filemtime($path);
-    $filesize = $is_dir ? false : filesize($path);
+    if(!$is_dir) $files_count ++; // files count
+    $is_link = $symlinked ? is_link($path) : false; // symlink
+    $basename = $is_link ? (basename($realpath) ?: $filename) : $filename;
+    $filemtime = filemtime($realpath);
+    $is_readable = is_readable($realpath);
+    $filesize = $is_dir ? false : filesize($realpath);
     if($filesize) $dirsize += $filesize;
-    $mime = $is_dir ? 'directory' : get_mime($path);
 
-    // add properties
-    $item = array(
-      'basename' => $basename,
-      'fileperms' => substr(sprintf('%o', fileperms($path)), -4),
-      'filetype' => $filetype,
-      'filesize' => $filesize,
-      'is_writeable' => is_writeable($path),
-      'mime' => $mime,
-      'mtime' => $filemtime,
-      'path' => root_relative($path)
-    );
+    // url_path / symlink
+    $item_url_path = $symlinked ? get_url_path($realpath) : false; // url_path from realpath if symlinked
+    if(!$item_url_path && $url_path) $item_url_path = $url_path . ($url_path === '/' ? '' : '/') . ($is_link ? basename($path) : $basename);
 
-    // url_path
-    if($url_path) $item['url_path'] = $url_path . '/' . $basename;
+    // root path // path relative to config::$root
+    if(!$symlinked || is_within_root($realpath)){
+      $root_path = root_relative($realpath);
 
-    // file-only properties
-    if(!$is_dir){
+    // path is symlinked and !is_within_root(), get path-relative
+    } else {
 
-      // icon
-      if(in_array(strtok($mime, '/'), array('archive', 'audio', 'image', 'video'))) $item['icon'] = strtok($mime, '/');
+      // root path to symlink
+      $root_path = root_relative($path);
 
-      // ext
-      $ext = pathinfo($path, PATHINFO_EXTENSION);
-      $item['ext'] = $ext ? strtolower($ext) : '';
-
-      // image
-      if($mime && strpos($mime, 'image') === 0 && !strpos($mime, 'svg')){
-
-        $images_count++;
-        
-        // getimagesize
-        $image_size = @getimagesize($path, $image_info);
-        if($image_size){
-
-          // start image array with $image_size array
-          $image = get_image_data($image_size);
-
-          // IPTC
-          $iptc = get_iptc($image_info);
-          if(!empty($iptc)) $image['iptc'] = $iptc;
-
-          // EXIF
-          $exif = get_exif($path);
-          if(!empty($exif)) {
-            $image['exif'] = $exif;
-            if(isset($exif['DateTimeOriginal'])) $item['DateTimeOriginal'] = $exif['DateTimeOriginal'];
+      // check for symlink loop
+      if($is_link && $is_dir && $path && $root_path) {
+        $basename_path = basename($root_path);
+        if($basename_path && preg_match('/(\/|^)' . $basename_path. '\//', $root_path)){
+          $loop_path = '';
+          $segments = explode('/', $root_path);
+          array_pop($segments);
+          foreach ($segments as $segment) {
+            $loop_path .= ($loop_path ? '/' : '') . $segment;
+            if($segment !== $basename_path) continue;
+            $loop_abs_path = root_absolute($loop_path);
+            if(!is_link($loop_abs_path) || $realpath !== real_path($loop_abs_path)) continue;
+            $root_path = $loop_path;
+            $item_url_path = get_url_path($loop_abs_path) ?: $item_url_path; // new symlink is within doc_root
+            break;
           }
-
-          // image resize cache direct
-          if(config::$image_resize_cache_direct){
-            $resize1 = get_image_cache_path($path, config::$config['image_resize_dimensions'], $filesize, $filemtime);
-            if(file_exists($resize1)) $image['resize' . config::$config['image_resize_dimensions']] = get_url_path($resize1);
-            $retina = config::$image_resize_dimensions_retina;
-            if($retina){
-              $resize2 = get_image_cache_path($path, $retina, $filesize, $filemtime);
-              if(file_exists($resize2)) $image['resize' . $retina] = get_url_path($resize2);
-            }
-          }
-
-          // add image to item
-          $item['image'] = $image;
         }
       }
     }
 
-    // add to items
+    // add properties
+    $item = array(
+      'basename' => $basename,
+      'fileperms' => substr(sprintf('%o', fileperms($realpath)), -4),
+      'filetype' => $filetype,
+      'filesize' => $filesize,
+      'is_readable' => $is_readable,
+      'is_writeable' => is_writeable($realpath),
+      'is_link' => $is_link,
+      'mtime' => $filemtime,
+      'path' => $root_path
+    );
+
+    // optional props
+    $ext = !$is_dir ? pathinfo($realpath, PATHINFO_EXTENSION) : false;
+    if($ext) {
+      $ext = strtolower($ext);
+      $item['ext'] = $ext;
+    }
+    $mime = $is_dir ? 'directory' : ($is_readable && (!$ext || config::$config['get_mime_type']) ? get_mime($realpath) : false);
+    if($mime) $item['mime'] = $mime;
+    if($item_url_path) $item['url_path'] = $item_url_path;
+
+    // image / check from mime, fallback to extension
+    $is_image = $is_dir ? false : ($mime ? (strtok($mime, '/') === 'image' && !strpos($mime, 'svg')) : in_array($ext, array('gif','jpg','jpeg','jpc','jp2','jpx','jb2','png','swf','psd','bmp','tiff','tif','wbmp','xbm','ico','webp')));
+    if($is_image){
+
+      // imagesize
+      $imagesize = $is_readable ? @getimagesize($realpath, $info) : false;
+
+      // image count and icon
+      $images_count ++;
+      $item['icon'] = 'image';
+
+      // is imagesize
+      if(!empty($imagesize) && is_array($imagesize)){
+
+        // start image array
+        $image = array();
+        foreach (array(0 => 'width', 1 => 'height', 2 => 'type', 'bits' => 'bits', 'channels' => 'channels', 'mime' => 'mime') as $key => $name) if(isset($imagesize[$key])) $image[$name] = $imagesize[$key];
+
+        // mime from image
+        if(!$mime && isset($image['mime'])) $item['mime'] = $image['mime'];
+
+        // IPTC
+        $iptc = $info ? get_iptc($info) : false;
+        if(!empty($iptc)) $image['iptc'] = $iptc;
+
+        // EXIF
+        $exif = get_exif($realpath);
+        if(!empty($exif)) {
+          $image['exif'] = $exif;
+          if(isset($exif['DateTimeOriginal'])) $item['DateTimeOriginal'] = $exif['DateTimeOriginal'];
+          // invert width/height if exif orientation
+          if(isset($exif['Orientation']) && $exif['Orientation'] > 4 && $exif['Orientation'] < 9){
+            $image['width'] = $imagesize[1];
+            $image['height'] = $imagesize[0];
+          }
+        }
+
+        // image resize cache direct
+        if(config::$image_resize_cache_direct){
+          $resize1 = get_image_cache_path($realpath, config::$config['image_resize_dimensions'], $filesize, $filemtime);
+          if(file_exists($resize1)) $image['resize' . config::$config['image_resize_dimensions']] = get_url_path($resize1);
+          $retina = config::$image_resize_dimensions_retina;
+          if($retina){
+            $resize2 = get_image_cache_path($realpath, $retina, $filesize, $filemtime);
+            if(file_exists($resize2)) $image['resize' . $retina] = get_url_path($resize2);
+          }
+        }
+
+        // add image to item
+        $item['image'] = $image;
+
+      // get real mime if getimagesize fails. Could be non-image disguised as image extension
+      } else if($is_readable && !$mime){
+        $mime = get_mime($realpath);
+        if($mime) {
+          $item['mime'] = $mime;
+          if(strtok($mime, '/') !== 'image'){ // unset images_count and icon because is not image after all
+            $images_count --;
+            unset($item['icon']);
+          }
+        }
+      }
+    }
+
+    // add to items with basename as key
     $items[$basename] = $item;
 	}
 
 	//
 	return $items;
 }
- 
+
 // get files
 function get_files($dir){
 
@@ -878,11 +1015,11 @@ function get_files($dir){
   if(!$dir) json_error('Invalid directory');
 
   // cache
-  $cache = get_dir_cache_path($dir);
+  $cache = get_dir_cache_path(real_path($dir));
 
   // read cache or get dir and cache
   if(!read_file($cache, 'application/json', 'files json served from cache')) {
-    json_cache(get_dir($dir, true), 'files json created' . ($cache ? ' and cached.' : '.'), $cache);
+    json_cache(get_dir($dir, true), 'files json created' . ($cache ? ' and cached' : ''), $cache);
   }
 }
 
@@ -897,8 +1034,7 @@ function json_cache($arr = array(), $msg = false, $cache = true){
 	header('content-type: application/json');
 	$json = empty($arr) ? '{}' : json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 	if($cache) @file_put_contents($cache, $json);
-	if($msg) header('files-msg: ' . $msg);
-  header_time();
+	if($msg) header('files-msg: ' . $msg . ' [' . header_memory_time() . ']');
 	echo $json;
 }
 function json_error($error = 'Error'){
@@ -909,8 +1045,15 @@ function json_success($success){
   header('Content-Type: application/json');
   exit('{"success":"' . $success . '"}');
 }
-function error($condition, $msg){
-	if($condition) exit('<strong>ERROR</strong>: ' . $msg);
+function error($msg, $code = false){
+  // 400 Bad Request, 403 Forbidden, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
+  if($code) http_response_code($code);
+  header('content-type: text/html');
+  header('Expires: ' . gmdate('D, d M Y H:i:s') . ' GMT');
+  header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0');
+  header('Cache-Control: post-check=0, pre-check=0', false);
+  header('Pragma: no-cache');
+	exit('<h2>Error</h2>' . $msg);
 }
 
 // get valid menu cache
@@ -933,7 +1076,7 @@ function get_root_dirs(){
   $root_dirs = glob(config::$root . '/*', GLOB_ONLYDIR|GLOB_NOSORT);
   if(empty($root_dirs)) return array();
   return array_filter($root_dirs, function($dir){
-    return !is_exclude($dir);
+    return !is_exclude($dir, true, is_link($dir));
   });
 }
 
@@ -941,7 +1084,7 @@ function get_root_dirs(){
 function get_menu_cache_hash($root_dirs){
   $mtime_count = filemtime(config::$root);
   foreach ($root_dirs as $root_dir) $mtime_count += filemtime($root_dir);
-  return substr(md5(config::$doc_root . __DIR__ . config::$root), 0, 6) . '.' . substr(md5(config::$version . config::$config['cache_key'] . config::$config['menu_max_depth'] . config::$config['menu_load_all'] . (config::$config['menu_load_all'] ? config::$config['files_exclude'] . config::$image_resize_cache_direct : '') . config::$has_login . config::$config['dirs_exclude'] . config::$config['menu_sort']), 0, 6) . '.' . $mtime_count;
+  return substr(md5(config::$doc_root . config::$__dir__ . config::$root), 0, 6) . '.' . substr(md5(config::$version . config::$config['cache_key'] . config::$config['menu_max_depth'] . config::$config['menu_load_all'] . (config::$config['menu_load_all'] ? config::$config['files_exclude'] . config::$image_resize_cache_direct : '') . config::$has_login . config::$config['dirs_exclude'] . config::$config['menu_sort']), 0, 6) . '.' . $mtime_count;
 }
 
 // get dirs
@@ -958,14 +1101,13 @@ function dirs(){
       !is_numeric($menu_cache_arr[2])
     ) json_error('Invalid menu cache hash'); // early exit
   }
-  $cache = config::$config['cache'] ? config::$cache_path . DIRECTORY_SEPARATOR . 'menu' . DIRECTORY_SEPARATOR . $menu_cache_hash . '.json' : false; // get cache path
+  $cache = config::$config['cache'] ? config::$cache_path . '/menu/' . $menu_cache_hash . '.json' : false; // get cache path
   $json = $cache ? get_valid_menu_cache($cache) : false; // get valid json menu cache
 
   // $json is valid from menu cache file
   if($json){
     header('content-type: application/json');
-    header('files-msg: valid menu cache hash [' . $menu_cache_hash . ']' . (!config::$config['menu_cache_validate'] ? '[deep validation disabled]' : ''));
-    header_time();
+    header('files-msg: valid menu cache hash [' . $menu_cache_hash . ']' . (!config::$config['menu_cache_validate'] ? '[deep validation disabled]' : '') . '[' . header_memory_time() . ']');
     echo (post('localstorage') ? '{"localstorage":"1"}' : $json);
     
   // reload dirs
@@ -978,9 +1120,8 @@ function dirs(){
 function custom_script($type){
   // todo maybe just use one file custom.css/js for easy edit?
   if(!config::$storage_path || !config::$storage_is_within_doc_root) return;
-  $dir = config::$storage_path . DIRECTORY_SEPARATOR . $type;
-  if(!file_exists($dir)) return;
-  $files = glob($dir . '/*.' . $type);
+  $dir = config::$storage_path . '/' . $type;
+  $files = file_exists($dir) ? glob($dir . '/*.' . $type) : false;
   if(empty($files)) return;
   $template = $type === 'css' ? '<link href="%url%" rel="stylesheet">' : '<script src="%url%"></script>';
   foreach($files as $file) echo str_replace('%url%', get_url_path($file) . '?' . filemtime($file), $template) . PHP_EOL;
@@ -1015,6 +1156,7 @@ if(post('action')){
     // valid path
     $file = valid_root_path(post('file'));
     if(!$file) json_error('Invalid file path');
+    $file = real_path($file); // in case of symlink path
 
 		// file write
 		if(post('write')) {
@@ -1029,7 +1171,6 @@ if(post('action')){
 		} else {
       header('content-type: text/plain; charset=utf-8');
       readfile($file);
-      //echo file_get_contents($file);
 		}
 
   // check login
@@ -1042,7 +1183,7 @@ if(post('action')){
     header('Content-Type: application/json');
     $data = @file_get_contents('https://data.jsdelivr.com/v1/package/npm/files.photo.gallery');
     $json = $data ? @json_decode($data, true) : false;
-    $latest = $json && $json['versions'] ? $json['versions'][0] : false;
+    $latest = !empty($json) && isset($json['versions']) ? $json['versions'][0] : false;
     if($latest) {
       $is_new = version_compare($latest, config::$version) > 0;
       exit('{"success":' . ($is_new ? '"'.$latest.'"' : 'false') . ($is_new ? ',"writeable":' . (is_writable(__DIR__) && is_writable(__FILE__) ? 'true' : 'false')  : '') . '}');
@@ -1058,6 +1199,12 @@ if(post('action')){
     $put = $get && strpos($get, '<?php') === 0 && substr($get, -2) === '?>' && @file_put_contents(__FILE__, $get);
     header('Content-Type: application/json');
     exit('{"success":' . ($put ? 'true' : 'false') . '}');
+
+  } else if($action === 'license'){
+    header('Content-Type: application/json');
+    $key = isset($_POST['key']) ? trim($_POST['key']) : false;
+    $success = config::$storage_config_realpath && $key && config::save_config(array('license_key' => $key));
+    exit('{"success":' . ($success ? 'true, "md5" : "' . md5($key) . '"' : 'false') . '}');
 
   // invalid action
 	} else {
@@ -1078,7 +1225,8 @@ if(post('action')){
 
 		// valid download
     $download = valid_root_path(get('download'));
-    if(!$download) exit('Invalid download path.');
+    if(!$download) error('Invalid download path <strong>' . get('download') . '</strong>', 404);
+    $download = real_path($download); // in case of symlink path
 
 	  // required for some browsers
 	  if(@ini_get('zlib.output_compression')) @ini_set('zlib.output_compression', 'Off');
@@ -1103,8 +1251,8 @@ if(post('action')){
     new config(true);
 
     // get plugin
-    $tasks_path = config::$storage_path . DIRECTORY_SEPARATOR . 'plugins' . DIRECTORY_SEPARATOR . 'tasks.php';
-    error(!file_exists($tasks_path), "Tasks plugin does not exist at <strong>$tasks_path</strong>");
+    $tasks_path = config::$storage_path . '/plugins/tasks.php';
+    if(!file_exists($tasks_path)) error("Tasks plugin does not exist at <strong>$tasks_path</strong>", 404);
     include $tasks_path;
     exit;
 
@@ -1115,15 +1263,15 @@ if(post('action')){
 new config(true);
 
 // validate exclude regex
-if(config::$config['files_exclude']) error(@preg_match(config::$config['files_exclude'], '') === false, 'Invalid files_exclude regex <strong>' . config::$config['files_exclude'] . '</strong>');
-if(config::$config['dirs_exclude']) error(@preg_match(config::$config['dirs_exclude'], '') === false, 'Invalid dirs_exclude regex <strong>' . config::$config['dirs_exclude'] . '</strong>');
+if(config::$config['files_exclude'] && @preg_match(config::$config['files_exclude'], '') === false) error('Invalid files_exclude regex <strong>' . config::$config['files_exclude'] . '</strong>');
+if(config::$config['dirs_exclude'] && @preg_match(config::$config['dirs_exclude'], '') === false) error('Invalid dirs_exclude regex <strong>' . config::$config['dirs_exclude'] . '</strong>');
 
 // start path
 $start_path = config::$config['start_path'];
 if($start_path){
-  $real_start_path = realpath($start_path);
-  error(!$real_start_path, 'start_path ' . $start_path . ' does not exist.');
-  error(!is_within_root($real_start_path), 'start_path ' . $start_path . ' is not within root dir ' . config::$config['root']);
+  $real_start_path = real_path($start_path);
+  if(!$real_start_path) error('start_path ' . $start_path . ' does not exist.');
+  if(!is_within_root($real_start_path)) error('start_path ' . $start_path . ' is not within root dir ' . config::$config['root']);
   $start_path = root_relative($real_start_path);
 }
 
@@ -1139,7 +1287,7 @@ if($menu_enabled){
   $menu_cache_hash = get_menu_cache_hash($root_dirs);
   // menu cache file (if cache, !menu_cache_validate, exists and is within doc root)
   if(config::$storage_is_within_doc_root && config::$config['cache'] && !config::$config['menu_cache_validate']) {
-    $menu_cache_path = config::$cache_path . DIRECTORY_SEPARATOR . 'menu' . DIRECTORY_SEPARATOR . $menu_cache_hash . '.json';
+    $menu_cache_path = config::$cache_path . '/menu/' . $menu_cache_hash . '.json';
     $menu_cache_file = file_exists($menu_cache_path) ? get_url_path($menu_cache_path) : false;
     if($menu_cache_file) $menu_cache_file .= '?' . filemtime($menu_cache_path);
   }
@@ -1147,7 +1295,7 @@ if($menu_enabled){
 
 // init path
 $query = config::$config['history'] && $_SERVER['QUERY_STRING'] ? explode('&', $_SERVER['QUERY_STRING']) : false;
-$query_path = $query && strpos($query[0], '=') === false ? rtrim(rawurldecode($query[0]), '/') : false;
+$query_path = $query && strpos($query[0], '=') === false && $query[0] != 'debug' ? rtrim(rawurldecode($query[0]), '/') : false;
 $query_path_valid = $query_path ? valid_root_path($query_path, true) : false;
 $init_path = $query_path ?: $start_path ?: '';
 
@@ -1173,8 +1321,14 @@ if(version_compare(PHP_VERSION, '5.4.0') >= 0) {
   if(version_compare(PHP_VERSION, '7.2.0') >= 0) $resize_image_types[] = 'bmp';
 }
 
+// image resize memory limit
+$image_resize_memory_limit = config::$config['image_resize_enabled'] && config::$config['image_resize_memory_limit'] && function_exists('ini_get') ? (int) @ini_get('memory_limit') : 0;
+if($image_resize_memory_limit && function_exists('ini_set')) $image_resize_memory_limit = max($image_resize_memory_limit, config::$config['image_resize_memory_limit']);
+
+$qrx = config::$config[base64_decode('bGljZW5zZV9rZXk')];
+
 // exclude some user settings from frontend
-$exclude = array_diff_key(config::$config, array_flip(array('root', 'start_path', 'image_resize_cache', 'image_resize_quality', 'image_resize_function', 'image_resize_cache_direct', 'menu_sort', 'menu_load_all', 'cache_key', 'storage_path', 'files_exclude', 'dirs_exclude', 'username', 'password', 'breadcrumbs')));
+$exclude = array_diff_key(config::$config, array_flip(array('root', 'start_path', 'image_resize_cache', 'image_resize_quality', 'image_resize_function', 'image_resize_cache_direct', 'menu_sort', 'menu_load_all', 'cache_key', 'storage_path', 'files_exclude', 'dirs_exclude', 'username', 'password', 'breadcrumbs', 'allow_tasks', 'allow_symlinks', 'menu_recursive_symlinks', 'image_resize_sharpen', 'get_mime_type', 'license_key')));
 $json_config = array_replace($exclude, array(
   'breadcrumbs' => $breadcrumbs,
   'script' => basename(__FILE__),
@@ -1193,11 +1347,14 @@ $json_config = array_replace($exclude, array(
   'location_hash' => md5(config::$root),
   'has_login' => config::$has_login,
   'version' => config::$version,
-  'index_html' => intval(get('index_html'))
+  'index_html' => intval(get('index_html')),
+  'server_exif' => function_exists('exif_read_data'),
+  'image_resize_memory_limit' => $image_resize_memory_limit,
+  'qrx' => $qrx && is_string($qrx) ? substr(md5($qrx), 0, strlen($qrx)) : false
 ));
 
-// time it
-header_time();
+// memory and time
+header('files-msg: [' . header_memory_time() . ']');
 
 // htmlstart
 ?>
@@ -1266,14 +1423,15 @@ header_time();
     <script src="https://cdn.jsdelivr.net/npm/filesize@6.1.0/lib/filesize.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/screenfull@5.0.2/dist/screenfull.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.24/dayjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.24/plugin/localizedFormat.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.24/plugin/relativeTime.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.34/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.34/plugin/localizedFormat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.8.34/plugin/relativeTime.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-alpha1/dist/js/bootstrap.min.js"></script>
     <script>
 var _c = <?php echo json_encode($json_config, JSON_PRETTY_PRINT); ?>;
 var CodeMirror = {};
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.52.2/mode/meta.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.57.0/mode/meta.js"></script>
     <!-- custom -->
     <?php custom_script('js'); ?>
     <!-- files -->
