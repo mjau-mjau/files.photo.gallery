@@ -18,12 +18,12 @@ if(!class_exists('config')) exit('ERROR: Tasks plugin cannot be accessed directl
 $allow = config::$config['allow_tasks'];
 
 // allow true || param || login
-if($allow === false || (!empty($allow) && is_string($allow) && !isset($_GET[$allow])) || (!$allow && !config::$has_login)) error(true, 'cannot!');
+if($allow === false || (!empty($allow) && is_string($allow) && !isset($_GET[$allow])) || (!$allow && !config::$has_login)) error('cannot!', 403);
 
 // task
 $task = get('task');
 $tasks_array = ['create_cache', 'clear_cache', 'create_html'];
-error(!in_array($task, $tasks_array), "Invalid task <strong>?task=$task<br><br>Available tasks</strong><br>[" . implode(', ', $tasks_array) . ']');
+if(!in_array($task, $tasks_array)) error("Invalid task <strong>?task=$task<br><br>Available tasks</strong><br>[" . implode(', ', $tasks_array) . ']', 400);
 
 // set time limit
 $time_limit = get('time_limit');
@@ -37,6 +37,10 @@ $do_all = iz('all');
 $do_menu = $do_all || iz('menu');
 $do_folders = $do_all || iz('folders');
 $do_images = $do_all || iz('images');
+
+// memory limit (used when $do_images)
+$memory_limit = $do_images ? (get('memory_limit') ?: config::$config['image_resize_memory_limit']) : false;
+if($memory_limit && is_numeric($memory_limit) && function_exists('ini_get') && $memory_limit > (int) @ini_get('memory_limit') && (!function_exists('ini_set') || !@ini_set('memory_limit', $memory_limit . 'M'))) error('Failed to set memory limit [' . $memory_limit . ']');
 
 // processed
 class processed {
@@ -57,13 +61,13 @@ function add_output($create = true, $count, $total, $force){
 
 // task: create_html [beta]
 if($task === 'create_html'){
-	error(config::$has_login, 'Cannot create html when login is enabled. Pointless!');
+	if(config::$has_login) error('Cannot create html when login is enabled. Pointless!', 400);
 	$time = time();
 	$url = 'http' . (!empty($_SERVER['HTTPS']) ? 's' : '' ) . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['PHP_SELF'] . '?index_html=' . $time;
 	$content = file_get_contents($url);
-  error(!$content, "Failed to execute <strong>file_get_contents('$url')</strong>;");
+  if(!$content) error("Failed to execute <strong>file_get_contents('$url')</strong>;", 500);
   $put = file_put_contents('index.html', '<!-- index_html ' . $time . ' -->' . PHP_EOL . preg_replace('/\s+/', ' ', $content));
-  error(!$put, "Failed to execute <strong>file_put_contents('$url')</strong>;");
+  if(!$put) error("Failed to execute <strong>file_put_contents('$url')</strong>;", 500);
   $output = "Successfully created <a href=\"./index.html?time=$time\">index.html</a> at $time";
 
 // task: create_cache [beta]
@@ -104,25 +108,28 @@ if($task === 'create_html'){
               $dirs[] = root_absolute($props['path']);
               continue;
             }
-            if(!isset($props['image']) || 
-               $props['filesize'] < config::$config['image_resize_min_filesize'] || 
-               $props['filesize']  > config::$config['image_resize_max_filesize']
-            ) continue;
+            if(!isset($props['image'])) continue;
+
+            // exif orientation
+            $orientation = isset($props['image']['exif']['Orientation']) ? $props['image']['exif']['Orientation'] : 0;
+
+            // original dimensions / get physical 
+            $original_width = $props['image'][($orientation > 4 && $orientation < 9 ? 'height' : 'width')];
+            $original_height = $props['image'][($orientation > 4 && $orientation < 9 ? 'width' : 'height')];
+
+            // image_resize_max_pixels early exit
+  					if(config::$config['image_resize_max_pixels'] && $original_width * $original_height > config::$config['image_resize_max_pixels']) continue;
 
             // vars
             $type = $props['image']['type'];
             $path = root_absolute($props['path']);
-
-            // original
-            $original_width = $props['image']['width'];
-            $original_height = $props['image']['height'];
 
             // loop image sizes
             foreach ($image_sizes as $index => $image_size) {
 
               // ratio
               $ratio = max($original_width, $original_height) / $image_size;
-              if($ratio < config::$config['image_resize_min_ratio']) continue;
+              if($ratio < max(config::$config['image_resize_min_ratio'], 1)) continue;
 
               // cache path
               $image_cache = get_image_cache_path($path, $image_size, $props['filesize'], $props['mtime']);
@@ -150,10 +157,19 @@ if($task === 'create_html'){
                 $new_image = imagecreatetruecolor($new_width, $new_height);
                 call_user_func(config::$config['image_resize_function'], $new_image, $image, 0, 0, 0, 0, $new_width, $new_height, $original_width, $original_height);
 
+                // destroy original $image resource
+  							imagedestroy($image);
+
+  							// fix orientation according to exif
+  							exif_orientation($orientation, $new_image);
+
+  							// sharpen resized image
+  							if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
+
                 // save as cache  
                 if(imagejpeg($new_image, $image_cache, config::$config['image_resize_quality'])) processed::$images ++;
 
-                // detroy
+                // detroy $new_image resource
                 imagedestroy($new_image);
               }
 
@@ -192,8 +208,8 @@ if($task === 'create_html'){
     // start create cache loop
     $start_dir = get('dir');
     if($start_dir){
-    	$start_dir = realpath($start_dir);
-    	error(!$start_dir, 'Dir does not exist <strong>dir=' . get('dir') . '</strong>');
+    	$start_dir = real_path($start_dir);
+    	if(!$start_dir) error('Dir does not exist <strong>dir=' . get('dir') . '</strong>', 404);
     }
     create_cache($start_dir?:config::$root, $do_folders, $do_images, $force);
   }
@@ -287,12 +303,12 @@ if($task === 'create_html'){
 
 // invalid task command
 } else {
-  error(1, "Invalid task command <strong>task=$task</strong>");
+  error("Invalid task command <strong>task=$task</strong>", 400);
 }
 
 // output
-header_time();
-error(!$output, 'No cache parameters selected [menu, folders, images, all]');
+header('files-msg: task [' . header_memory_time() . ']');
+if(!$output) error('No cache parameters selected [menu, folders, images, all]', 400);
 echo $output . '<br>-<br>Processed in ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . ' seconds.';
 
 

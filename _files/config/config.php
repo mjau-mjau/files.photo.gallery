@@ -48,7 +48,7 @@ return array (
   //'popup_interval' => 5000,
   //'topbar_sticky' => 'scroll',
   //'check_updates' => true,
-  //'allow_tasks' => NULL,
+  //'allow_tasks' => true,
   //'get_mime_type' => false,
   //'context_menu' => true,
   //'prevent_right_click' => false,

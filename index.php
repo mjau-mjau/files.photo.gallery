@@ -74,7 +74,7 @@ class config {
     'popup_interval' => 5000,
     'topbar_sticky' => 'scroll', // true, false, 'scroll'
     'check_updates' => true,
-    'allow_tasks' => null,
+    'allow_tasks' => true,
     'get_mime_type' => false, // get file mime type from server (slow) instead of from extension (fast)
     'context_menu' => true, // disable context-menu button and right-click menu
     'prevent_right_click' => false, // blocks browser right-click menu on sensitive items (images, list items, menu)
@@ -89,7 +89,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.2.0';
+  static $version = '0.2.1';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -539,6 +539,15 @@ function sharpen_image($image){
   $offset = 0; 
   imageconvolution($image, $matrix, $divisor, $offset);
 }
+
+// exif orientation
+// https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
+function exif_orientation($orientation, &$image){
+  if(empty($orientation) || !is_numeric($orientation) || $orientation < 3 || $orientation > 8) return;
+  $image = imagerotate($image, array(6 => 270, 5 => 270, 3 => 180, 4 => 180, 8 => 90, 7 => 90)[$orientation], null);
+  if(in_array($orientation, array(5, 4, 7)) && function_exists('imageflip')) imageflip($image, IMG_FLIP_HORIZONTAL);
+  return true;
+}
   
 // resize image
 function resize_image($path, $resize_dimensions){
@@ -596,24 +605,8 @@ function resize_image($path, $resize_dimensions){
   imagedestroy($image);
 
   // exif orientation
-  // https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
-  if(function_exists('exif_read_data')){
-    $exif = @exif_read_data($path);
-    if(!empty($exif) && is_array($exif) && isset($exif['Orientation'])) {
-      $orientation = $exif['Orientation'];
-      if(!empty($orientation) && is_numeric($orientation) && $orientation > 1 && $orientation < 9) {
-        if($orientation === 6 || $orientation === 5){
-          $new_image = imagerotate($new_image, 270, null);
-        } elseif ($orientation === 3 || $orientation === 4){
-          $new_image = imagerotate($new_image, 180, null);
-        } elseif ($orientation === 8 || $orientation === 7){
-          $new_image = imagerotate($new_image, 90, null);
-        }
-        if(in_array($orientation, array(5, 4, 7)) && function_exists('imageflip')) imageflip($new_image, IMG_FLIP_HORIZONTAL);
-        $header_props .= ', orientated from EXIF:' . $orientation;
-      }
-    }
-  }
+  $exif = function_exists('exif_read_data') ? @exif_read_data($path) : false;
+  if(!empty($exif) && is_array($exif) && isset($exif['Orientation']) && exif_orientation($exif['Orientation'], $new_image)) $header_props .= ', orientated from EXIF:' . $exif['Orientation'];
 
   // sharpen resized image
   if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
@@ -1191,13 +1184,13 @@ if(post('action')){
     exit('{"error": true }');
 
   } else if($action === 'do_update'){
+    header('Content-Type: application/json');
     $version = post('version');
-    $file = 'https://cdn.jsdelivr.net/npm/files.photo.gallery' . ($version ? '@'.$version : '') . '/index.php';
+    $file = 'https://cdn.jsdelivr.net/npm/files.photo.gallery' . ($version ? '@' . $version : '') . '/index.php';
     $update_is_newer = !$version || version_compare($version, config::$version) > 0;
     $writeable = $update_is_newer && is_writable(__DIR__) && is_writable(__FILE__);
     $get = $writeable ? @file_get_contents($file) : false;
     $put = $get && strpos($get, '<?php') === 0 && substr($get, -2) === '?>' && @file_put_contents(__FILE__, $get);
-    header('Content-Type: application/json');
     exit('{"success":' . ($put ? 'true' : 'false') . '}');
 
   } else if($action === 'license'){
@@ -1325,7 +1318,7 @@ if(version_compare(PHP_VERSION, '5.4.0') >= 0) {
 $image_resize_memory_limit = config::$config['image_resize_enabled'] && config::$config['image_resize_memory_limit'] && function_exists('ini_get') ? (int) @ini_get('memory_limit') : 0;
 if($image_resize_memory_limit && function_exists('ini_set')) $image_resize_memory_limit = max($image_resize_memory_limit, config::$config['image_resize_memory_limit']);
 
-$qrx = config::$config[base64_decode('bGljZW5zZV9rZXk')];
+$wtc = config::$config[base64_decode('bGljZW5zZV9rZXk')];
 
 // exclude some user settings from frontend
 $exclude = array_diff_key(config::$config, array_flip(array('root', 'start_path', 'image_resize_cache', 'image_resize_quality', 'image_resize_function', 'image_resize_cache_direct', 'menu_sort', 'menu_load_all', 'cache_key', 'storage_path', 'files_exclude', 'dirs_exclude', 'username', 'password', 'breadcrumbs', 'allow_tasks', 'allow_symlinks', 'menu_recursive_symlinks', 'image_resize_sharpen', 'get_mime_type', 'license_key')));
@@ -1350,7 +1343,7 @@ $json_config = array_replace($exclude, array(
   'index_html' => intval(get('index_html')),
   'server_exif' => function_exists('exif_read_data'),
   'image_resize_memory_limit' => $image_resize_memory_limit,
-  'qrx' => $qrx && is_string($qrx) ? substr(md5($qrx), 0, strlen($qrx)) : false
+  'qrx' => $wtc && is_string($wtc) ? substr(md5($wtc), 0, strlen($wtc)) : false
 ));
 
 // memory and time
