@@ -89,7 +89,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.2.1';
+  static $version = '0.2.2';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -219,11 +219,12 @@ class config {
       // cache_path real path
       self::$cache_path = self::$storage_path . '/cache';
 
-      // create cache dirs
+      // create storage dirs
       if($is_doc){
-        $dirs = $image_cache ? ['images'] : [];
-        if(self::$config['cache']) array_push($dirs, 'folders', 'menu');
-        foreach($dirs as $dir) mkdir_or_error(self::$cache_path . '/' . $dir);
+        $create_dirs = [$storage_realpath . '/config'];
+        if($image_cache) $create_dirs[] = self::$cache_path . '/images';
+        if(self::$config['cache']) array_push($create_dirs, self::$cache_path . '/folders', self::$cache_path . '/menu');
+        foreach($create_dirs as $create_dir) mkdir_or_error($create_dir);
       }
 
       // create/update config file, with default parameters commented out.
