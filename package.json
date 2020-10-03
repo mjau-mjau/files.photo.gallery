@@ -1,6 +1,6 @@
 {
   "name": "files.photo.gallery",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Single-file PHP file gallery and file manager / https://files.photo.gallery/demo/",
   "main": "index.php",
   "scripts": {
