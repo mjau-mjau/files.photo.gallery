@@ -14,53 +14,95 @@ header('pragma: no-cache');
 // block direct access
 if(!class_exists('config')) exit('ERROR: Tasks plugin cannot be accessed directly!');
 
-// allow
-$allow = config::$config['allow_tasks'];
+// tasks
+Class tasks {
 
-// allow true || param || login
-if($allow === false || (!empty($allow) && is_string($allow) && !isset($_GET[$allow])) || (!$allow && !config::$has_login)) error('cannot!', 403);
-
-// task
-$task = get('task');
-$tasks_array = ['create_cache', 'clear_cache', 'create_html'];
-if(!in_array($task, $tasks_array)) error("Invalid task <strong>?task=$task<br><br>Available tasks</strong><br>[" . implode(', ', $tasks_array) . ']', 400);
-
-// set time limit
-$time_limit = get('time_limit');
-if($time_limit) set_time_limit(intval($time_limit));
-
-// vars
-function iz($p){ return isset($_GET[$p]);}
-$output = '';
-$force = iz('force');
-$do_all = iz('all');
-$do_menu = $do_all || iz('menu');
-$do_folders = $do_all || iz('folders');
-$do_images = $do_all || iz('images');
-
-// memory limit (used when $do_images)
-$memory_limit = $do_images ? (get('memory_limit') ?: config::$config['image_resize_memory_limit']) : false;
-if($memory_limit && is_numeric($memory_limit) && function_exists('ini_get') && $memory_limit > (int) @ini_get('memory_limit') && (!function_exists('ini_set') || !@ini_set('memory_limit', $memory_limit . 'M'))) error('Failed to set memory limit [' . $memory_limit . ']');
-
-// processed
-class processed {
-  public static $folders = 0;
+  // output
+  public static $output = '';
+  public static $folders_processed = 0;
   public static $folders_count = 0;
-  public static $images = 0;
+  public static $images_processed = 0;
   public static $images_count = 0;
-  public static $menu = 0;
+  public static $menu_processed = 0;
   public static $menu_count = 0;
+
+  // task / 'create_cache', 'clear_cache', 'create_html'
+  public static $task = false;
+
+  // tasks
+  public static $force = false; // for overwrite / does not apply for images
+  public static $all = false; // run all tasks
+  public static $menu = false; // menu cache
+  public static $folders = false; // recursive folders cache
+  public static $images = false; // rescursice images cache
+  public static $video_thumbs = false; // part of 'images' task / required ffmpeg
+
+  // resize_types
+  public static $resize_types = [];
+
+
+  // isset
+  public static function isset($str){
+    return isset($_GET[$str]);
+  }
+
+  // output
+  public static function add_output($prepend = '', $create = true, $count = 0, $total = 0){
+    $action = $create ? 'created' : 'removed';
+    $items = $total === 1 ? 'item' : 'items';
+    self::$output .= ($prepend ? $prepend . ' ': '') . 'cache items ' . $action . ': <strong>[' . $count . ' / ' . $total . ']</strong>' . ($total && tasks::$force ? ' (force ' . $action . ')' : '') . ($count === $total ? '' : ' (' . ($total - $count) . ' ' . $items . ' still valid)') . '<br>';
+  }
+
+  // set_memory_limit
+  private function set_memory_limit(){
+    $memory_limit = get('memory_limit') ?: config::$config['image_resize_memory_limit'];
+    if($memory_limit && is_numeric($memory_limit) && $memory_limit > -1 && function_exists('ini_get') && $memory_limit > (int) @ini_get('memory_limit') && (!function_exists('ini_set') || !@ini_set('memory_limit', $memory_limit . 'M'))) error('Failed to set memory limit [' . $memory_limit . ']');
+  }
+
+  // process
+  function __construct() {
+
+    // allow_tasks 
+    $allow = config::$config['allow_tasks'];
+    if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !config::$has_login)) error('cannot!', 403);
+
+    // assign task / 'create_cache', 'clear_cache', 'create_html'
+    self::$task = get('task');
+
+    // check if tasks if available
+    $tasks_array = ['create_cache', 'clear_cache', 'create_html'];
+    if(!in_array(self::$task, $tasks_array)) error('Invalid task <strong>?task=' . (self::$task || '') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
+
+    // assign tasks
+    self::$force = self::isset('force');
+    self::$all = self::isset('all');
+    self::$menu = self::$all || self::isset('menu');
+    self::$folders = self::$all || self::isset('folders');
+    self::$images = self::$all || self::isset('images');
+
+    // assign memory limit (used only when resizing images)
+    if(self::$images) self::set_memory_limit();
+
+    // increase time limit ?time_limit=300 (300 seconds, useful when resizing massive amounts of images)
+    $time_limit = get('time_limit');
+    if($time_limit) set_time_limit(intval($time_limit));
+
+    // get image resize types
+    self::$resize_types = array_map(function($key){
+      $type = trim(strtolower($key));
+      return $type === 'jpg' ? 'jpeg' : $type;
+    }, explode(',', config::$config['image_resize_types']));
+
+    // video thumbs array if ffmpeg supported
+    self::$video_thumbs = config::$config['video_thumbs'] && config::$config['video_ffmpeg_path'] && @function_exists('exec') && @exec('type -P ' . config::$config['video_ffmpeg_path']) ? ['mp4', 'mkv', 'ogv', 'm4v', 'webm'] : false;
+  }
 }
 
-// add output
-function add_output($create = true, $count, $total, $force){
-  $action = $create ? 'created' : 'removed';
-  $items = $total === 1 ? 'item' : 'items';
-  return ' cache items ' . $action . ': <strong>[' . $count . ' / ' . $total . ']</strong>' . ($total && $force ? ' (force ' . $action . ')' : '') . ($count === $total ? '' : ' (' . ($total - $count) . ' ' . $items . ' still valid)') . '<br>';
-}
+// init tasks
+new tasks();
 
 // task: create_html [beta]
-if($task === 'create_html'){
+if(tasks::$task === 'create_html'){
 	if(config::$has_login) error('Cannot create html when login is enabled. Pointless!', 400);
 	$time = time();
 	$url = 'http' . (!empty($_SERVER['HTTPS']) ? 's' : '' ) . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['PHP_SELF'] . '?index_html=' . $time;
@@ -68,29 +110,29 @@ if($task === 'create_html'){
   if(!$content) error("Failed to execute <strong>file_get_contents('$url')</strong>;", 500);
   $put = file_put_contents('index.html', '<!-- index_html ' . $time . ' -->' . PHP_EOL . preg_replace('/\s+/', ' ', $content));
   if(!$put) error("Failed to execute <strong>file_put_contents('$url')</strong>;", 500);
-  $output = "Successfully created <a href=\"./index.html?time=$time\">index.html</a> at $time";
+  tasks::$output = "Successfully created <a href=\"./index.html?time=$time\">index.html</a> at $time";
 
 // task: create_cache [beta]
-} else if($task === 'create_cache') {
+} else if(tasks::$task === 'create_cache') {
 
   // early exit
   if(!config::$config['cache']) exit('cache is disabled.');
 
   // create folders and images
-  if($do_folders || $do_images) {
+  if(tasks::$folders || tasks::$images) {
 
     // create cache loop function
-    function create_cache($dir, $do_folders = false, $do_images = false, $force = false, $depth = 0){
+    function create_cache($dir, $depth = 0){
 
-      // exclude
-      if(is_exclude($dir)) return 0;
+      // skip dir
+      if(!is_readable($dir) || is_exclude($dir)) return 0;
 
       // dir cache path
-      processed::$folders_count ++;
+      tasks::$folders_count ++;
       $cache = get_dir_cache_path($dir);
       $cache_exists = file_exists($cache);
-      $cache_recreate = $force || !$cache_exists ? true : false;
-      $get_dir = $do_images || $cache_recreate ? true : false;
+      $cache_recreate = tasks::$force || !$cache_exists ? true : false;
+      $get_dir = tasks::$images || $cache_recreate ? true : false;
 
       // get dir
       if($get_dir){
@@ -99,7 +141,9 @@ if($task === 'create_html'){
         $arr = $cache_recreate ? get_dir($dir, true) : json_decode(file_get_contents($cache), true);
 
         // resize images
-        if($do_images && config::$config['image_resize_enabled'] && config::$config['image_resize_cache'] && !empty($arr) && !empty($arr['files'])){
+        if(tasks::$images && config::$config['image_resize_enabled'] && config::$config['image_resize_cache'] && !empty($arr) && !empty($arr['files'])){
+
+          //
           $dirs = array();
           $image_sizes = array(config::$config['image_resize_dimensions']);
           if(config::$image_resize_dimensions_retina) $image_sizes[] = config::$image_resize_dimensions_retina;
@@ -108,7 +152,29 @@ if($task === 'create_html'){
               $dirs[] = root_absolute($props['path']);
               continue;
             }
+
+            // video thumb
+            if(tasks::$video_thumbs && isset($props['ext']) && in_array(strtolower($props['ext']), tasks::$video_thumbs)){
+
+              // get cache path
+              $video_thumb_cache = get_image_cache_path(root_absolute($props['path']), 480, $props['filesize'], $props['mtime']);
+
+              // attempt to create if video thumb does not exist
+              if(!file_exists($video_thumb_cache)) {
+                // ffmpeg command
+                $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -i ' . escapeshellarg(real_path(root_absolute($props['path']))) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $video_thumb_cache . ' 2>&1';
+                // try to execute command
+                @exec($cmd, $output, $result_code);
+                // fail if result_code is anything else than 0
+                tasks::$output .= ($result_code ? 'failed to create thumbnail for video ' : 'Video thumbnail created for ') . $props['path'] . '<br>';
+              }
+            } 
+
+            // proceed if image
             if(!isset($props['image'])) continue;
+
+            // exit if image type is not resize type
+            if(!in_array(image_type_to_extension($props['image']['type'], false), tasks::$resize_types)) continue;
 
             // exif orientation
             $orientation = isset($props['image']['exif']['Orientation']) ? $props['image']['exif']['Orientation'] : 0;
@@ -137,7 +203,7 @@ if($task === 'create_html'){
 
               // skip if cache exists
               if($image_cache_exists){
-                processed::$images_count ++;
+                tasks::$images_count ++;
 
               // create image acche
               } else {
@@ -147,7 +213,7 @@ if($task === 'create_html'){
                 if(!$image) break;
 
                 // count
-                processed::$images_count ++;
+                tasks::$images_count ++;
 
                 // Calculate new image dimensions.
                 $new_width  = round($original_width / $ratio);
@@ -167,7 +233,7 @@ if($task === 'create_html'){
   							if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
 
                 // save as cache  
-                if(imagejpeg($new_image, $image_cache, config::$config['image_resize_quality'])) processed::$images ++;
+                if(imagejpeg($new_image, $image_cache, config::$config['image_resize_quality'])) tasks::$images_processed ++;
 
                 // detroy $new_image resource
                 imagedestroy($new_image);
@@ -181,19 +247,19 @@ if($task === 'create_html'){
         
         // save json
         if($cache_recreate) {
-          $json = empty($arr) ? '{}' : json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-          if(file_put_contents($cache, $json)) processed::$folders ++;
+          $json = empty($arr) ? '{}' : json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
+          if(file_put_contents($cache, $json)) tasks::$folders_processed ++;
         }
       }
 
       // max depth
-      if(!iz('ignore_max_depth') && config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return;
+      if(!tasks::isset('ignore_max_depth') && config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return;
 
       // subdirs
       if($get_dir){
         if(!isset($dirs)){
           $dirs = array();
-          foreach ($arr['files'] as $key => $val) if($val['filetype'] === 'dir') $dirs[] = root_absolute($val['path']);
+          if(isset($arr['files'])) foreach ($arr['files'] as $key => $val) if($val['filetype'] === 'dir') $dirs[] = root_absolute($val['path']);
         } 
 
       // glob subdirs
@@ -202,7 +268,7 @@ if($task === 'create_html'){
       }
 
       // sub dirs
-      if(!empty($dirs)) foreach($dirs as $dir) create_cache($dir, $do_folders, $do_images, $force, $depth + 1);
+      if(!empty($dirs)) foreach($dirs as $dir) create_cache($dir, $depth + 1);
     }
 
     // start create cache loop
@@ -211,30 +277,30 @@ if($task === 'create_html'){
     	$start_dir = real_path($start_dir);
     	if(!$start_dir) error('Dir does not exist <strong>dir=' . get('dir') . '</strong>', 404);
     }
-    create_cache($start_dir?:config::$root, $do_folders, $do_images, $force);
+    create_cache($start_dir?:config::$root);
   }
   
   // create menu
-  if($do_menu) {
+  if(tasks::$menu) {
     $menu_cache_hash = get_menu_cache_hash(get_root_dirs());
     $menu_cache_file = config::$cache_path . DIRECTORY_SEPARATOR . 'menu' . DIRECTORY_SEPARATOR . $menu_cache_hash . '.json';
-    processed::$menu_count = 1;
+    tasks::$menu_count = 1;
 
     // recreate menu
-    if($force || !get_valid_menu_cache($menu_cache_file)){
+    if(tasks::$force || !get_valid_menu_cache($menu_cache_file)){
       $menu_cache_arr = get_dirs(config::$root);
-      $menu_cache_json = empty($menu_cache_arr) ? '{}' : json_encode($menu_cache_arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-      if(file_put_contents($menu_cache_file, $menu_cache_json)) processed::$menu ++;
+      $menu_cache_json = empty($menu_cache_arr) ? '{}' : json_encode($menu_cache_arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
+      if(file_put_contents($menu_cache_file, $menu_cache_json)) tasks::$menu_processed ++;
     } 
   }
 
   // output
-  if($do_menu) $output .= 'Menu' . add_output(true, processed::$menu, processed::$menu_count, $force);
-  if($do_folders || $do_images) $output .= 'Folders' . add_output(true, processed::$folders, processed::$folders_count, $force);
-  if($do_images) $output .= 'Images' . add_output(true, processed::$images, processed::$images_count, false);
+  if(tasks::$menu) tasks::add_output('Menu', true, tasks::$menu_processed, tasks::$menu_count);
+  if(tasks::$folders || tasks::$images) tasks::add_output('Folders', true, tasks::$folders_processed, tasks::$folders_count);
+  if(tasks::$images) tasks::add_output('Images', true, tasks::$images_processed, tasks::$images_count);
 
-// clear cache [beta]
-} else if($task === 'clear_cache'){
+// clear cache [beta] / does not not use 'dir'
+} else if(tasks::$task === 'clear_cache'){
 
   // get cache items
   function get_cache_items($dir, $ext){
@@ -244,28 +310,28 @@ if($task === 'create_html'){
   }
 
   // menu
-  if($do_menu){
+  if(tasks::$menu){
     $menu_cache_items = get_cache_items('menu', 'json');
-    processed::$menu_count = count($menu_cache_items);
-    if(processed::$menu_count){
-      $menu_cache_hash = $force ? false : get_menu_cache_hash(get_root_dirs());
+    tasks::$menu_count = count($menu_cache_items);
+    if(tasks::$menu_count){
+      $menu_cache_hash = tasks::$force ? false : get_menu_cache_hash(get_root_dirs());
       foreach ($menu_cache_items as $menu_cache_item) {
-        if($force || basename($menu_cache_item) !== $menu_cache_hash . '.json') {
-          if(unlink($menu_cache_item)) processed::$menu ++;
+        if(tasks::$force || basename($menu_cache_item) !== $menu_cache_hash . '.json') {
+          if(unlink($menu_cache_item)) tasks::$menu_processed ++;
         }
       }
     }
-    $output .= 'Menu' . add_output(false, processed::$menu, processed::$menu_count, $force);
+    tasks::add_output('Menu', false, tasks::$menu_processed, tasks::$menu_count);
   }
 
   // folders
-  if($do_folders){
+  if(tasks::$folders){
     $dirs_cache_items = get_cache_items('folders', 'json');
-    processed::$folders_count = count($dirs_cache_items);
-    if(processed::$folders_count){
+    tasks::$folders_count = count($dirs_cache_items);
+    if(tasks::$folders_count){
       foreach ($dirs_cache_items as $dirs_cache_item) {
-        if($force || strpos(basename($dirs_cache_item), config::$dirs_hash) !== 0) {
-          if(unlink($dirs_cache_item)) processed::$folders ++;
+        if(tasks::$force || strpos(basename($dirs_cache_item), config::$dirs_hash) !== 0) {
+          if(unlink($dirs_cache_item)) tasks::$folders_processed ++;
           continue;
         }
         $dir_cache_content = file_get_contents($dirs_cache_item);
@@ -273,42 +339,38 @@ if($task === 'create_html'){
           $dir_cache_json = json_decode($dir_cache_content, true);
           $dir_abs_path = root_absolute($dir_cache_json['path']);
           if(!file_exists($dir_abs_path) || $dir_cache_json['mtime'] !== filemtime($dir_abs_path)) {
-            if(unlink($dirs_cache_item)) processed::$folders ++;
+            if(unlink($dirs_cache_item)) tasks::$folders_processed ++;
           }   
         }
       }
     }
-    $output .= 'Folders' . add_output(false, processed::$folders, processed::$folders_count, $force);
+    tasks::add_output('Folders', false, tasks::$folders_processed, tasks::$folders_count);
   }
 
-  // images
-  if($do_images){
+  // clear image cache / 
+  if(tasks::$images){
     $image_cache_items = get_cache_items('images', 'jpg');
-    processed::$images_count = count($image_cache_items);
-    if(processed::$images_count){
+    tasks::$images_count = count($image_cache_items);
+    if(tasks::$images_count){
       foreach ($image_cache_items as $image_cache_item) {
-        if($force){
-          if(unlink($image_cache_item)) processed::$images ++;
+        if(tasks::$force){
+          if(unlink($image_cache_item)) tasks::$images_processed ++;
           continue;
         }
         $image_cache_item_arr = explode('.', basename($image_cache_item));
         $resize_val = isset($image_cache_item_arr[3]) && is_numeric($image_cache_item_arr[3]) ? intval($image_cache_item_arr[3]) : false;
         if(!$resize_val || !in_array($resize_val, [config::$config['image_resize_dimensions'], config::$image_resize_dimensions_retina])) {
-          if(unlink($image_cache_item)) processed::$images ++;
+          if(unlink($image_cache_item)) tasks::$images_processed ++;
         }
       }
     }
-    $output .= 'Image' . add_output(false, processed::$images, processed::$images_count, $force);
+    tasks::add_output('Image', false, tasks::$images_processed, tasks::$images_count);
   }
-
-// invalid task command
-} else {
-  error("Invalid task command <strong>task=$task</strong>", 400);
 }
 
 // output
 header('files-msg: task [' . header_memory_time() . ']');
-if(!$output) error('No cache parameters selected [menu, folders, images, all]', 400);
-echo $output . '<br>-<br>Processed in ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . ' seconds.';
+if(!tasks::$output) error('No cache parameters selected [menu, folders, images, all]', 400);
+echo tasks::$output . '<br>-<br>Processed in ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . ' seconds.';
 
 
