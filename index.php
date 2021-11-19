@@ -1948,7 +1948,7 @@ var CodeMirror = {};
     <!-- custom -->
     <?php get_include('js/custom.js'); ?>
     <!-- files -->
-    <script src="<?php echo config::$assets ?>js/files.js"></script>
+    <script src="js/files.js"></script>
 
   </body>
 </html>
