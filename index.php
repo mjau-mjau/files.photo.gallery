@@ -88,7 +88,7 @@ class config {
     'download_dir_cache' => 'dir', // enable caching of created zip dirs / 'dir' / 'storage' / '' false (disabled)
     
     // filemanager options
-    'allow_upload' => false, // allow uploader
+    'allow_upload' => true, // allow uploader
     'allow_delete' => false, // allow deleting files and folders
     'allow_rename' => false, // allow renaming files and folders
     'allow_new_folder' => false, // allow make new directory
@@ -1948,7 +1948,7 @@ var CodeMirror = {};
     <!-- custom -->
     <?php get_include('js/custom.js'); ?>
     <!-- files -->
-    <script src="<?php echo config::$assets ?>js/files.js"></script>
+    <script src="./js/files.js"></script>
 
   </body>
 </html>
