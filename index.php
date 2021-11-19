@@ -1303,7 +1303,7 @@ if(post('action')){
     // demo_mode
     if(config::$config['demo_mode']) json_error('Action not allowed in demo mode');
     // license required for file manager action
-    if(!config::$config['license_key']) json_error('License required!');
+    //BYPASS: if(!config::$config['license_key']) json_error('License required!');
 
     // valid path / path must be inside assigned root
     $is_dir = post('is_dir');
