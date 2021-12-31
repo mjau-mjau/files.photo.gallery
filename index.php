@@ -582,6 +582,11 @@ function image_create_from($path, $type){
   }
 }
 
+// path correction for ffmpeg
+function mb_escapeshellarg($arg) {
+  return '"' . str_replace("'", "'\"'\"'", $arg) . '"';
+}
+
 // get file (proxy or resize image)
 function get_file($path, $resize = false){
 
@@ -606,7 +611,7 @@ function get_file($path, $resize = false){
     if($cache) read_file($cache, null, 'Video thumb served from cache', null, true);
 
     // ffmpeg command
-    $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -i ' . escapeshellarg($path) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $cache . ' 2>&1';
+    $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -ss 3 -t 1 -hide_banner -i "' . mb_escapeshellarg($path) . '" -vframes:v 1 -an -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $cache . ' 2>&1';
 
     // try to execute command
     exec($cmd, $output, $result_code);
