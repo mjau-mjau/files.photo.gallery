@@ -584,7 +584,7 @@ function image_create_from($path, $type){
 
 // path correction for ffmpeg
 function mb_escapeshellarg($arg) {
-  return '"' . str_replace("'", "'\"'\"'", $arg) . '"';
+  return "" . str_replace("'", "'\"'\"'", $arg) . "";
 }
 
 // get file (proxy or resize image)
