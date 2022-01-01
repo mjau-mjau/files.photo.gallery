@@ -606,14 +606,22 @@ function get_file($path, $resize = false){
     if($cache) read_file($cache, null, 'Video thumb served from cache', null, true);
 
     // ffmpeg command
-    $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -i ' . escapeshellarg($path) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $cache . ' 2>&1';
+    $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -hide_banner -i ' . escapeshellarg($path) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $cache . ' 2>&1';
 
     // try to execute command
     exec($cmd, $output, $result_code);
 
     // fail if result_code is anything else than 0
-    if($result_code) error("Error generating thumbnail for video (\$result_code $result_code)", 400);
-
+    if($result_code) {
+      // experimental error log saving
+      if ( $output != "" ) {
+        $errfile = 'cmd_error.log';
+        $errtext = date("Y-m-d H:i:s")." ".print_r($output, true).PHP_EOL;
+        file_put_contents(config::$config['storage_path'].DIRECTORY_SEPARATOR.$errfile, $errtext, FILE_APPEND | LOCK_EX);
+      }
+    error("Error generating thumbnail for video (\$result_code $result_code)", 400);
+    }
+	  
     // output created video thumbnail
     read_file($cache, null, 'Video thumb created', null, true);
 
