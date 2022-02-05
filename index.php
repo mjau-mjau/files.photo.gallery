@@ -118,8 +118,8 @@ class config {
   static $__dir__ = __DIR__;
   static $__file__ = __FILE__;
   static $assets;
-  static $prod = false;
-  static $version = '0.4.0';
+  static $prod = true;
+  static $version = '0.4.1';
   static $root;
   static $doc_root;
   static $has_login = false;
