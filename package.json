@@ -1,6 +1,6 @@
 {
   "name": "files.photo.gallery",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Single-file PHP file gallery and file manager / https://demo.files.gallery/",
   "main": "index.php",
   "scripts": {
@@ -18,7 +18,7 @@
     "photo gallery"
   ],
   "bugs": {
-    "url" : "https://forum.files.gallery/"
+    "url": "https://forum.files.gallery/"
   },
   "author": "Karl Ward <karl@photo.gallery> (https://www.photo.gallery)",
   "license": "SEE LICENSE IN LICENSE.md",
