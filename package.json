@@ -1,7 +1,7 @@
 {
   "name": "files.photo.gallery",
   "version": "0.4.0",
-  "description": "Single-file PHP file gallery and file manager / https://files.photo.gallery/demo/",
+  "description": "Single-file PHP file gallery and file manager / https://demo.files.gallery/",
   "main": "index.php",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,16 +12,15 @@
   },
   "keywords": [
     "php",
-    "javascript",
-    "single-file",
-    "fileviewer",
-    "filemanager",
-    "gallery",
-    "iptc",
-    "exif",
-    "gps"
+    "single file",
+    "file viewer",
+    "file manager",
+    "photo gallery"
   ],
+  "bugs": {
+    "url" : "https://forum.files.gallery/"
+  },
   "author": "Karl Ward <karl@photo.gallery> (https://www.photo.gallery)",
-  "license": "ISC",
-  "homepage": "https://files.photo.gallery/"
+  "license": "SEE LICENSE IN LICENSE.md",
+  "homepage": "https://www.files.gallery/"
 }

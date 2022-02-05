@@ -1,6 +1,6 @@
 <?php 
 
-// CONFIG / https://forum.photo.gallery/viewtopic.php?f=66&t=9964
+// CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
 return array (
   //'root' => '',
@@ -36,6 +36,7 @@ return array (
   //'layout' => 'rows',
   //'sort' => 'name_asc',
   //'sort_dirs_first' => true,
+  //'sort_function' => 'locale',
   //'cache' => true,
   //'cache_key' => 0,
   //'storage_path' => '_files',
@@ -43,7 +44,6 @@ return array (
   //'dirs_exclude' => '',
   //'allow_symlinks' => true,
   //'history' => true,
-  //'breadcrumbs' => true,
   //'transitions' => true,
   //'click' => 'popup',
   //'click_window' => '',
@@ -73,13 +73,6 @@ return array (
   //'upload_note' => '',
   //'upload_exists' => 'increment',
   //'popup_video' => true,
-  //'popup_transition' => 'glide',
-  //'popup_transition_play' => 'inherit',
-  //'popup_interval' => 5000,
-  //'popup_caption' => true,
-  //'popup_caption_hide' => true,
-  //'popup_caption_style' => 'block',
-  //'popup_caption_align' => 'center-left',
   //'video_thumbs' => true,
   //'video_ffmpeg_path' => 'ffmpeg',
   //'video_autoplay' => true,

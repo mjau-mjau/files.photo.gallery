@@ -1,32 +1,38 @@
-# Files App
+# [Files](https://www.files.gallery/)
 
-Files is a single-file PHP application that can be dropped into any directory, allowing browsing of files and directories inside.
+Files is a single-file PHP app that can be dropped into any folder on server, instantly creating a gallery of files and folders
+**[[Demo]](https://demo.files.gallery/)**
 
-![Files app](https://x.photo.gallery/files-app.jpg)
+✔️ **File browser.** Instantly browse files and folders without complicated setup.
+✔️ **File sharing.** Conveniently share files and photos with clients and friends.
+✔️ **Photo gallery.** Use as a simple yet beautiful gallery for your website.
+✔️ **File manager.** Upload and manage files and folders directly on server.
 
-### Demo
+![Files app](https://x.photo.gallery/files-app-07-jan-2022.jpg)
 
-[files.photo.gallery/demo/](https://files.photo.gallery/demo/)
+✔️ Beautiful interface designed for modern browsers.
+✔️ Advanced layouts that can be toggled in real-time.
+✔️ Sort and filter files in real-time.
+✔️ Fast loading with preview and folder caching.
+✔️ Code highlighter for viewing and editing code.
+✔️ Advanced folder tree-menu navigation.
+✔️ Optional login.
+✔️ Multi-language interface.
+✔️ Beautiful popup image viewer.
 
-### Download
+---
 
-[index.php](https://cdn.jsdelivr.net/npm/files.photo.gallery/index.php)
+**Installation**
+Simply [download index.php](https://cdn.jsdelivr.net/npm/files.photo.gallery/index.php), drop into any folder and view from browser.
+[Docs](https://www.files.gallery/docs/install/) | [Config](https://www.files.gallery/docs/config/)
 
-### Features
+**Requirements**
+Files app requires a web server with PHP 5.5 or higher.
+[Requirements](https://www.files.gallery/docs/config/)
 
-* Single file. Simply drop into any directory to view files and folders within.
-* Displays exif, IPTC and GPS meta data from JPG.
-* View and edit any code with code-highlighting.
-* Very fast cache mechanisms.
+**License**
+Files is free to use with basic features. To remove the license-popup and unlock additional features, you may purchase a license [$39] from within the app.
 
-### Instructions
+---
 
-Simply drop index.php into any directory, and it will create a gallery of all files and a menu from the subfolders of the directory. For advanced configuration, open index.php in any text editor and edit configuration settings. Optionally, you can create a persistent external config file [[READ MORE](https://forum.photo.gallery/viewtopic.php?f=66&t=9964)]
-
-### Newsletter
-
-Stay updated with Files app through our newsletter.
-[Subscribe!](http://eepurl.com/gTyhA9)
-
-### Website
-Find more info @ [files.photo.gallery](https://files.photo.gallery/).
+**[www.files.gallery](https://www.files.gallery/)** | [Demo](https://demo.files.gallery/) | [Docs](https://www.files.gallery/docs/install/) | [Support](https://forum.files.gallery/) | [Subscribe](http://eepurl.com/gTyhA9)
