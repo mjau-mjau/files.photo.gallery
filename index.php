@@ -5,6 +5,9 @@ www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
 
+// so that basename() and other functions work correctly on multi-
+setlocale(LC_ALL,'en_US.UTF-8');
+
 // config
 class config {
 
@@ -122,7 +125,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.5.2';
+  static $version = '0.5.3';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -422,6 +425,12 @@ function check_login($is_doc){
 //
 function mkdir_or_error($path){
   if(!file_exists($path) && !mkdir($path, 0777, true)) error('Failed to create ' . $path, 500);
+}
+function _basename($path){
+  return basename($path); // because setlocale(LC_ALL,'en_US.UTF-8')
+  // replace basename() which may fail on UTF-8 chars if locale != UTF8
+  // $arr = explode('/', str_replace('\\', '/', $path));
+  //return end($arr);
 }
 function _basename($path){ // replace basename() which may fail on UTF-8 depending on locale
   $arr = explode('/', $path);
