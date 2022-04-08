@@ -125,7 +125,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.5.3';
+  static $version = '0.5.4';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -428,13 +428,9 @@ function mkdir_or_error($path){
 }
 function _basename($path){
   return basename($path); // because setlocale(LC_ALL,'en_US.UTF-8')
-  // replace basename() which may fail on UTF-8 chars if locale != UTF8
+  // OPTIONAL: replace basename() which may fail on UTF-8 chars if locale != UTF8
   // $arr = explode('/', str_replace('\\', '/', $path));
-  //return end($arr);
-}
-function _basename($path){ // replace basename() which may fail on UTF-8 depending on locale
-  $arr = explode('/', $path);
-  return end($arr);
+  // return end($arr);
 }
 function real_path($path){
   $real_path = realpath($path);
