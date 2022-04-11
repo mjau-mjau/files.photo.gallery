@@ -1,6 +1,6 @@
 <?php
 
-/* Files app 0.5.0
+/* Files app 0.5.4
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
@@ -61,7 +61,7 @@ class config {
 
     // cache
     'cache' => true,
-    'cache_key' => 6,
+    'cache_key' => 0,
     'storage_path' => '_files',
 
     // exclude files directories regex
@@ -125,7 +125,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.5.4';
+  static $version = '0.5.5';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -1098,6 +1098,17 @@ function get_files_data($dir, $url_path = false, &$dirsize = 0, &$files_count = 
             $image['width'] = $imagesize[1];
             $image['height'] = $imagesize[0];
           }
+        }
+
+        // panorama equirectangular if w/h === 2 / find resized panoramas '_files_{size}_{filename.jpg}'
+        if($item_url_path && $imagesize[0] && $imagesize[0] > 2048 && $imagesize[0]/$imagesize[1] === 2){
+          $panorama_resized = [];
+          // check for resizes if resize >= original
+          foreach ([2048, 4096, 8192] as $resize) {
+            if($resize >= $imagesize[0]) break;
+            if(file_exists($dir . '/_files_' . $resize . '_' . $filename)) $panorama_resized[] = $resize;
+          }
+          if(!empty($panorama_resized)) $item['panorama_resized'] = array_reverse($panorama_resized);
         }
 
         // image resize cache direct
