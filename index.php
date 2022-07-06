@@ -1,11 +1,11 @@
 <?php
 
-/* Files app 0.5.4
+/* Files app 0.5.5
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
 
-// so that basename() and other functions work correctly on multi-
+// so that basename() and other functions work correctly on multi-byte strings.
 setlocale(LC_ALL,'en_US.UTF-8');
 
 // config
@@ -125,7 +125,7 @@ class config {
   static $__file__ = __FILE__;
   static $assets;
   static $prod = true;
-  static $version = '0.5.5';
+  static $version = '0.5.6';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -173,7 +173,7 @@ class config {
     exists_writeable(config::$config['storage_path'], 'storage_path');
     if((file_exists(config::$config['root']) && !is_writable(config::$config['root'])) || (file_exists(config::$config['storage_path']) && !is_writable(config::$config['storage_path']))) exists_writeable(__FILE__, _basename(__FILE__));
     // extension_loaded
-    if(function_exists('extension_loaded')) foreach (['gd', 'exif'] as $name) echo prop($name, extension_loaded($name));
+    if(function_exists('extension_loaded')) foreach (['gd', 'exif', 'mbstring'] as $name) echo prop($name, extension_loaded($name));
     // zip
     echo prop('ZipArchive', class_exists('ZipArchive'));
     // function_exsists
@@ -215,6 +215,15 @@ class config {
     highlight_string($output . PHP_EOL . ';?>');
     echo '</div></body></html>';
     exit;
+  }
+
+  // check if root points to a dir inside X3 content / invalidate X3 cache on filemanager action / X3 license
+  private function x3_check() {
+    if(empty(self::$config['root']) || !is_string(self::$config['root'])) return;
+    $path_arr = explode('/content', self::$config['root']);
+    if(count($path_arr) < 2 || !@file_exists($path_arr[0] . '/app/x3.inc.php')) return;
+    self::$x3_path = real_path($path_arr[0]);
+    if(!self::$has_login) get_include('plugins/files.x3-login.php'); // optional x3 login plugin
   }
 
   // save config
@@ -308,11 +317,8 @@ class config {
       if(self::$config['image_resize_cache_direct'] && !self::$has_login && self::$config['load_images'] && self::$config['image_resize_cache'] && self::$config['image_resize_enabled'] && self::$storage_is_within_doc_root) self::$image_resize_cache_direct = true;
     }
 
-    // root is X3 'content' ? images from X3 resize cache / invalidate X3 cache on filemanager action / X3 license
-    if(_basename(self::$root) === 'content' && @file_exists(dirname(self::$root) . '/app/x3.inc.php')) {
-      self::$x3_path = dirname(self::$root); // assign x3_path (for file manager invalidate and image resize paths)
-      if(!self::$has_login) get_include('plugins/files.x3-login.php'); // optional x3 login plugin
-    }
+    // check if root points to a dir inside X3 content / allows invalidate X3 cache on filemanager actions, X3 resized images and X3 license
+    self::x3_check();
 
     // image_resize_dimensions_retina
     if(self::$config['image_resize_dimensions_retina'] && self::$config['image_resize_dimensions_retina'] > self::$config['image_resize_dimensions']) self::$image_resize_dimensions_retina = self::$config['image_resize_dimensions_retina'];
@@ -1826,7 +1832,8 @@ $json_config = array_replace($exclude, array(
   'video_thumbs_enabled' => !!get_ffmpeg_path(),
   'lang_custom' => lang_custom(),
   'x3_path' => config::$x3_path ? get_url_path(config::$x3_path) : false,
-  'assets' => config::$assets
+  'assets' => config::$assets,
+  'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false
 ));
 
 // calculate bytes from PHP ini settings
