@@ -1,6 +1,6 @@
 <?php
 
-/* Files app 0.5.7
+/* Files app 0.6.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
@@ -86,8 +86,9 @@ class config {
     'license_key' => '',
     'filter_live' => true,
     'filter_props' => 'name, filetype, mime, features, title',
-    'download_dir' => 'zip',
+    'download_dir' => 'browser',
     'download_dir_cache' => 'dir',
+    'assets' => '',
 
     // filemanager options
     'allow_upload' => false,
@@ -110,7 +111,6 @@ class config {
     // video
     'video_thumbs' => true,
     'video_ffmpeg_path' => 'ffmpeg',
-    'video_autoplay' => true,
 
     // language
     'lang_default' => 'en',
@@ -123,9 +123,7 @@ class config {
   // app vars
   static $__dir__ = __DIR__;
   static $__file__ = __FILE__;
-  static $assets;
-  static $prod = true;
-  static $version = '0.5.7';
+  static $version = '0.6.0';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -141,6 +139,7 @@ class config {
   static $username = false;
   static $password = false;
   static $x3_path = false;
+  static $assets;
 
   // get config
   private function get_config($path) {
@@ -256,9 +255,6 @@ class config {
     $user_valid = array_intersect_key($user_config, self::$default);
     self::$config = array_replace(self::$default, $user_valid);
 
-    // CDN assets
-    self::$assets = self::$prod ? 'https://cdn.jsdelivr.net/npm/files.photo.gallery@' . self::$version . '/' : '';
-
     // root
     self::$root = real_path(self::$config['root']);
 
@@ -326,6 +322,9 @@ class config {
     // dirs hash
     self::$dirs_hash = substr(md5(self::$doc_root . self::$__dir__ . self::$root . self::$version .  self::$config['cache_key'] . self::$image_resize_cache_direct . self::$config['files_exclude'] . self::$config['dirs_exclude']), 0, 6);
 
+    // Assign assets url for plugins/JS/CSS/languages, defaults to CDN
+    if($is_doc) self::$assets = empty(self::$config['assets']) ? 'https://cdn.jsdelivr.net/npm/' : rtrim(self::$config['assets'], '/') . '/';
+
     // login
     if(self::$has_login) check_login($is_doc);
   }
@@ -341,7 +340,7 @@ function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no, shrink-to-fit=no">
     <meta name="robots" content="noindex,nofollow">
     <title>Login</title>
-    <link href="<?php echo config::$assets ?>css/files.css" rel="stylesheet">
+    <link href="<?php echo config::$assets ?>files.photo.gallery@<?php echo config::$version ?>/css/files.css" rel="stylesheet">
     <?php get_include('css/custom.css'); ?>
   </head>
   <body><div id="files-login-container"></div></body>
@@ -377,15 +376,12 @@ function check_login($is_doc){
   if($is_doc && empty(config::$password)) error('Password cannot be empty.');
   if(session_status() === PHP_SESSION_NONE && !session_start() && $is_doc) error('Failed to initiate PHP session_start();', 500);
 
-  function get_client_hash(){
-    foreach(array('HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR') as $key){
-      if(isset($_SERVER[$key]) && !empty($_SERVER[$key]) && filter_var($_SERVER[$key], FILTER_VALIDATE_IP)) return md5($_SERVER[$key] . $_SERVER['HTTP_USER_AGENT'] . __FILE__ . $_SERVER['HTTP_HOST']);
-    }
-    error('Invalid IP', 401);
+  // [security] client hash and login hash
+  foreach(['HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR'] as $key){
+    $ip = isset($_SERVER[$key]) && !empty($_SERVER[$key]) ? explode(',', $_SERVER[$key])[0] : '';
+    if($ip && filter_var($ip, FILTER_VALIDATE_IP)) break;
   }
-
-  // hash
-  $client_hash = get_client_hash();
+  $client_hash = md5($ip . (isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '') . __FILE__ . (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : ''));
   $login_hash = md5(config::$username . config::$password . $client_hash);
 
   // login status
@@ -828,12 +824,6 @@ function get_dir($path, $files = false, $json_url = false){
 
     // files array
     $arr['files'] = get_files_data($path, $url_path, $arr['dirsize'], $arr['files_count'], $arr['images_count'], $arr['preview']);
-
-    // download_dir cache direct access to zip / better caching and no need to access PHP / only works when download_dir_cache === 'dir'
-    /*if($url_path && config::$config['download_dir'] === 'zip' && config::$config['download_dir_cache'] === 'dir') {
-      $zip = $realpath . '/_files.zip';
-      if(file_exists($zip) && filemtime($zip) >= $filemtime) $arr['zip'] = get_url_path($zip);
-    }*/
   }
 
 	// json cache path
@@ -1141,6 +1131,14 @@ function get_files_data($dir, $url_path = false, &$dirsize = 0, &$files_count = 
             unset($item['icon']);
           }
         }
+      }
+
+    // read .URL shortcut files and present as links / https://fileinfo.com/extension/url
+    } else if($is_readable && $ext === 'url'){
+      $url_lines = @file($realpath);
+      if(!empty($url_lines) && is_array($url_lines)) foreach ($url_lines as $str) if(preg_match('/^url\s*=\s*([\S\s]+)/i', trim($str), $url_matches) && !empty($url_matches) && isset($url_matches[1])){
+        $item['url'] = $url_matches[1];
+        break;
       }
     }
 
@@ -1832,8 +1830,8 @@ $json_config = array_replace($exclude, array(
   'video_thumbs_enabled' => !!get_ffmpeg_path(),
   'lang_custom' => lang_custom(),
   'x3_path' => config::$x3_path ? get_url_path(config::$x3_path) : false,
-  'assets' => config::$assets,
-  'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false
+  'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false,
+  'assets' => config::$assets, // computed assets path
 ));
 
 // calculate bytes from PHP ini settings
@@ -1875,7 +1873,7 @@ header('files-msg: [' . header_memory_time() . ']');
     <meta name="robots" content="noindex,nofollow">
     <title><?php echo $init_path ? _basename($init_path) : '/'; ?></title>
     <?php get_include('include/head.html'); ?>
-    <link href="<?php echo config::$assets ?>css/files.css" rel="stylesheet">
+    <link href="<?php echo config::$assets ?>files.photo.gallery@<?php echo config::$version ?>/css/files.css" rel="stylesheet">
     <?php get_include('css/custom.css'); ?>
   </head>
   <body class="body-loading"><svg viewBox="0 0 18 18" class="svg-preloader svg-preloader-active preloader-body"><circle cx="9" cy="9" r="8" pathLength="100" class="svg-preloader-circle"></svg>
@@ -1918,26 +1916,74 @@ header('files-msg: [' . header_memory_time() . ']');
     <?php get_include('include/footer.html'); ?>
 
     <!-- Javascript -->
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.4.5/dist/sweetalert2.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.1/lib/anime.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@exeba/list.js@2.3.1/dist/list.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/yall-js@3.2.0/dist/yall.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/filesize@8.0.7/lib/filesize.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/screenfull@5.2.0/dist/screenfull.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.0/dayjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.0/plugin/localizedFormat.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.0/plugin/relativeTime.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/js-file-downloader@1.1.24/dist/js-file-downloader.min.js"></script>
     <script>
 var _c = <?php echo json_encode($json_config, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_PARTIAL_OUTPUT_ON_ERROR); ?>;
 var CodeMirror = {};
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.2/mode/meta.js"></script>
-    <!-- custom -->
-    <?php get_include('js/custom.js'); ?>
-    <!-- files -->
-    <script src="<?php echo config::$assets ?>js/files.js"></script>
+    <?php
 
+    // load _files/js/custom.js if exists
+    get_include('js/custom.js');
+
+    // load all Javascript assets
+    foreach (array_filter([
+      'sweetalert2@11.4.23/dist/sweetalert2.min.js',
+      'animejs@3.2.1/lib/anime.min.js',
+      '@exeba/list.js@2.3.1/dist/list.min.js',
+      'yall-js@3.2.0/dist/yall.min.js',
+      'filesize@9.0.11/lib/filesize.min.js',
+      'screenfull@5.2.0/dist/screenfull.min.js',
+      'dayjs@1.11.4/dayjs.min.js',
+      'dayjs@1.11.4/plugin/localizedFormat.js',
+      'dayjs@1.11.4/plugin/relativeTime.js',
+      (in_array(config::$config['download_dir'], ['zip', 'files']) ? 'js-file-downloader@1.1.24/dist/js-file-downloader.min.js' : false),
+      (config::$config['download_dir'] === 'browser' ? 'jszip@3.10.1/dist/jszip.min.js' : false),
+      (config::$config['download_dir'] === 'browser' ? 'file-saver@2.0.5/dist/FileSaver.min.js' : false),
+      'codemirror@5.65.6/mode/meta.js',
+      'files.photo.gallery@' . config::$version . '/js/files.js'
+    ]) as $key) echo '<script src="' . config::$assets . $key . '"></script>';
+    ?>
+
+
+    <script>
+
+        /*(function (document, src, libName, config) {
+            var script             = document.createElement('script');
+            script.src             = src;
+            script.async           = true;
+            var firstScriptElement = document.getElementsByTagName('script')[0];
+            script.onload          = function () {
+                for (var namespace in config) {
+                    if (config.hasOwnProperty(namespace)) {
+                        window[libName].setup.setConfig(namespace, config[namespace]);
+                    }
+                }
+                window[libName].register();
+
+
+                TwoCoInlineCart.cart.setCurrency('USD');
+                TwoCoInlineCart.cart.setTest(true);
+                TwoCoInlineCart.products.add({
+                 code: "10001"
+                });
+
+                ['cart:opened', 'cart:closed', 'payment:finalized', 'fulfillment:finalized'].forEach((key) => {
+                  TwoCoInlineCart.events.subscribe(key, function () {
+                    console.log(key + ' triggered');
+                  });
+                });
+
+                TwoCoInlineCart.cart.setReturnMethod({
+                 type: 'redirect',
+                 url : 'http://my-test-site.com/return-url'
+                });
+                //TwoCoInlineCart.cart.setSignature('c05c712e7c14a23a425b799d39c7304bcc1715c6e903513da57f47fc164b93f9');
+                TwoCoInlineCart.cart.checkout();
+            };
+
+            firstScriptElement.parentNode.insertBefore(script, firstScriptElement);
+        })(document, 'https://secure.2checkout.com/checkout/client/twoCoInlineCart.js', 'TwoCoInlineCart',{"app":{"merchant":"598985","iframeLoad":"checkout"},"cart":{"host":"https:\/\/secure.2checkout.com","customization":"inline"}});*/
+    </script>
   </body>
 </html>
 <?php }}

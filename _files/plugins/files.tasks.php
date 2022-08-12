@@ -34,7 +34,7 @@ Class tasks {
   public static $all = false; // run all tasks
   public static $menu = false; // menu cache
   public static $folders = false; // recursive folders cache
-  public static $images = false; // rescursice images cache
+  public static $images = false; // rescursive images cache
   public static $video_thumbs = false; // part of 'images' task / required ffmpeg
 
   // resize_types
@@ -62,7 +62,7 @@ Class tasks {
   // process
   function __construct() {
 
-    // allow_tasks 
+    // allow_tasks
     $allow = config::$config['allow_tasks'];
     if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !config::$has_login)) error('cannot!', 403);
 
@@ -70,8 +70,8 @@ Class tasks {
     self::$task = get('task');
 
     // check if tasks if available
-    $tasks_array = ['create_cache', 'clear_cache', 'create_html'];
-    if(!in_array(self::$task, $tasks_array)) error('Invalid task <strong>?task=' . (self::$task || '') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
+    $tasks_array = ['create_cache', 'clear_cache', 'create_html', 'download_assets'];
+    if(!in_array(self::$task, $tasks_array)) error('Invalid task <strong>?task=' . (self::$task?:'') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
 
     // assign tasks
     self::$force = self::isset('force');
@@ -102,7 +102,37 @@ Class tasks {
 new tasks();
 
 // task: create_html [beta]
-if(tasks::$task === 'create_html'){
+if(tasks::$task === 'download_assets'){
+
+  // requirements
+  if(empty(config::$storage_path)) error('config::$storage_path is empty!', 400); // storage_path must exist
+  if(!class_exists('ZipArchive')) error('PHP ZipArchive class is required.', 400); // ZipArchive required to unzip downloaded assets.zip
+  if(!is_writable(__DIR__)) error(__DIR__ . ' is not writeable. Can\'t download.', 400); // must be able to write assets.zip to current dir
+  $assets_path = config::$storage_path . '/assets';
+  if(file_exists($assets_path) && !is_writable($assets_path)) error("$assets_path is not writeable!", 400); // $assets_path must be writeable
+
+  // attempt to download
+  //$assets_download = 'http://files.test/npm/_files/assets/assets.zip';
+  $assets_download = 'https://cdn.jsdelivr.net/npm/files.photo.gallery@' . config::$version . '/_files/assets/assets.zip';
+  $assets_downloaded = file_get_contents($assets_download);
+  if(empty($assets_downloaded)) error("Can't download <a href=\"$assets_download\">$assets_download</a>", 400); // failed to download
+
+  // write assets.zip temporarily into current __DIR__
+  $assets_zip = __DIR__ . '/assets.zip';
+  if(empty(file_put_contents($assets_zip, $assets_downloaded))) error("Failed to write $assets_zip", 400);
+
+  // unzip into _files/assets/*
+  $zip = new \ZipArchive;
+  if(!$zip->open($assets_zip)) error("Failed to open $assets_zip", 400);
+  $zip->extractTo($assets_path);
+  $zip->close();
+  unlink($assets_zip); // delete downloaded zip
+
+  // output
+  tasks::$output = "Successfully downloaded assets into <code>$assets_path</code>.";
+
+// task: create_html [beta]
+} else if(tasks::$task === 'create_html'){
 	if(config::$has_login) error('Cannot create html when login is enabled. Pointless!', 400);
 	$time = time();
 	$url = 'http' . (!empty($_SERVER['HTTPS']) ? 's' : '' ) . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['PHP_SELF'] . '?index_html=' . $time;
@@ -136,7 +166,7 @@ if(tasks::$task === 'create_html'){
 
       // get dir
       if($get_dir){
-        
+
         // dir from cache or new
         $arr = $cache_recreate ? get_dir($dir, true) : json_decode(file_get_contents($cache), true);
 
@@ -168,7 +198,7 @@ if(tasks::$task === 'create_html'){
                 // fail if result_code is anything else than 0
                 tasks::$output .= ($result_code ? 'failed to create thumbnail for video ' : 'Video thumbnail created for ') . $props['path'] . '<br>';
               }
-            } 
+            }
 
             // proceed if image
             if(!isset($props['image'])) continue;
@@ -179,7 +209,7 @@ if(tasks::$task === 'create_html'){
             // exif orientation
             $orientation = isset($props['image']['exif']['Orientation']) ? $props['image']['exif']['Orientation'] : 0;
 
-            // original dimensions / get physical 
+            // original dimensions / get physical
             $original_width = $props['image'][($orientation > 4 && $orientation < 9 ? 'height' : 'width')];
             $original_height = $props['image'][($orientation > 4 && $orientation < 9 ? 'width' : 'height')];
 
@@ -232,7 +262,7 @@ if(tasks::$task === 'create_html'){
   							// sharpen resized image
   							if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
 
-                // save as cache  
+                // save as cache
                 if(imagejpeg($new_image, $image_cache, config::$config['image_resize_quality'])) tasks::$images_processed ++;
 
                 // detroy $new_image resource
@@ -244,7 +274,7 @@ if(tasks::$task === 'create_html'){
             }
           }
         }
-        
+
         // save json
         if($cache_recreate) {
           $json = empty($arr) ? '{}' : json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
@@ -260,7 +290,7 @@ if(tasks::$task === 'create_html'){
         if(!isset($dirs)){
           $dirs = array();
           if(isset($arr['files'])) foreach ($arr['files'] as $key => $val) if($val['filetype'] === 'dir') $dirs[] = root_absolute($val['path']);
-        } 
+        }
 
       // glob subdirs
       } else {
@@ -279,7 +309,7 @@ if(tasks::$task === 'create_html'){
     }
     create_cache($start_dir?:config::$root);
   }
-  
+
   // create menu
   if(tasks::$menu) {
     $menu_cache_hash = get_menu_cache_hash(get_root_dirs());
@@ -291,7 +321,7 @@ if(tasks::$task === 'create_html'){
       $menu_cache_arr = get_dirs(config::$root);
       $menu_cache_json = empty($menu_cache_arr) ? '{}' : json_encode($menu_cache_arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
       if(file_put_contents($menu_cache_file, $menu_cache_json)) tasks::$menu_processed ++;
-    } 
+    }
   }
 
   // output
@@ -340,14 +370,14 @@ if(tasks::$task === 'create_html'){
           $dir_abs_path = root_absolute($dir_cache_json['path']);
           if(!file_exists($dir_abs_path) || $dir_cache_json['mtime'] !== filemtime($dir_abs_path)) {
             if(unlink($dirs_cache_item)) tasks::$folders_processed ++;
-          }   
+          }
         }
       }
     }
     tasks::add_output('Folders', false, tasks::$folders_processed, tasks::$folders_count);
   }
 
-  // clear image cache / 
+  // clear image cache /
   if(tasks::$images){
     $image_cache_items = get_cache_items('images', 'jpg');
     tasks::$images_count = count($image_cache_items);
@@ -372,5 +402,3 @@ if(tasks::$task === 'create_html'){
 header('files-msg: task [' . header_memory_time() . ']');
 if(!tasks::$output) error('No cache parameters selected [menu, folders, images, all]', 400);
 echo tasks::$output . '<br>-<br>Processed in ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . ' seconds.';
-
-

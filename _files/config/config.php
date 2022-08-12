@@ -1,4 +1,4 @@
-<?php 
+<?php
 
 // CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
@@ -58,8 +58,9 @@ return array (
   //'license_key' => '',
   //'filter_live' => true,
   //'filter_props' => 'name, filetype, mime, features, title',
-  //'download_dir' => 'zip',
+  //'download_dir' => 'browser',
   //'download_dir_cache' => 'dir',
+  //'assets' => '',
   //'allow_upload' => false,
   //'allow_delete' => false,
   //'allow_rename' => false,
@@ -74,7 +75,6 @@ return array (
   //'popup_video' => true,
   //'video_thumbs' => true,
   //'video_ffmpeg_path' => 'ffmpeg',
-  //'video_autoplay' => true,
   //'lang_default' => 'en',
   //'lang_auto' => true,
 );
