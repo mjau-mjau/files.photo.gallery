@@ -1,6 +1,6 @@
 <?php
 
-/* Files app 0.6.0
+/* Files app 0.7.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
@@ -123,7 +123,7 @@ class config {
   // app vars
   static $__dir__ = __DIR__;
   static $__file__ = __FILE__;
-  static $version = '0.6.0';
+  static $version = '0.7.0';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -1927,15 +1927,15 @@ var CodeMirror = {};
 
     // load all Javascript assets
     foreach (array_filter([
-      'sweetalert2@11.4.23/dist/sweetalert2.min.js',
+      'sweetalert2@11.4.26/dist/sweetalert2.min.js',
       'animejs@3.2.1/lib/anime.min.js',
       '@exeba/list.js@2.3.1/dist/list.min.js',
       'yall-js@3.2.0/dist/yall.min.js',
       'filesize@9.0.11/lib/filesize.min.js',
       'screenfull@5.2.0/dist/screenfull.min.js',
-      'dayjs@1.11.4/dayjs.min.js',
-      'dayjs@1.11.4/plugin/localizedFormat.js',
-      'dayjs@1.11.4/plugin/relativeTime.js',
+      'dayjs@1.11.5/dayjs.min.js',
+      'dayjs@1.11.5/plugin/localizedFormat.js',
+      'dayjs@1.11.5/plugin/relativeTime.js',
       (in_array(config::$config['download_dir'], ['zip', 'files']) ? 'js-file-downloader@1.1.24/dist/js-file-downloader.min.js' : false),
       (config::$config['download_dir'] === 'browser' ? 'jszip@3.10.1/dist/jszip.min.js' : false),
       (config::$config['download_dir'] === 'browser' ? 'file-saver@2.0.5/dist/FileSaver.min.js' : false),
@@ -1943,47 +1943,6 @@ var CodeMirror = {};
       'files.photo.gallery@' . config::$version . '/js/files.js'
     ]) as $key) echo '<script src="' . config::$assets . $key . '"></script>';
     ?>
-
-
-    <script>
-
-        /*(function (document, src, libName, config) {
-            var script             = document.createElement('script');
-            script.src             = src;
-            script.async           = true;
-            var firstScriptElement = document.getElementsByTagName('script')[0];
-            script.onload          = function () {
-                for (var namespace in config) {
-                    if (config.hasOwnProperty(namespace)) {
-                        window[libName].setup.setConfig(namespace, config[namespace]);
-                    }
-                }
-                window[libName].register();
-
-
-                TwoCoInlineCart.cart.setCurrency('USD');
-                TwoCoInlineCart.cart.setTest(true);
-                TwoCoInlineCart.products.add({
-                 code: "10001"
-                });
-
-                ['cart:opened', 'cart:closed', 'payment:finalized', 'fulfillment:finalized'].forEach((key) => {
-                  TwoCoInlineCart.events.subscribe(key, function () {
-                    console.log(key + ' triggered');
-                  });
-                });
-
-                TwoCoInlineCart.cart.setReturnMethod({
-                 type: 'redirect',
-                 url : 'http://my-test-site.com/return-url'
-                });
-                //TwoCoInlineCart.cart.setSignature('c05c712e7c14a23a425b799d39c7304bcc1715c6e903513da57f47fc164b93f9');
-                TwoCoInlineCart.cart.checkout();
-            };
-
-            firstScriptElement.parentNode.insertBefore(script, firstScriptElement);
-        })(document, 'https://secure.2checkout.com/checkout/client/twoCoInlineCart.js', 'TwoCoInlineCart',{"app":{"merchant":"598985","iframeLoad":"checkout"},"cart":{"host":"https:\/\/secure.2checkout.com","customization":"inline"}});*/
-    </script>
   </body>
 </html>
 <?php }}
