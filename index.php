@@ -1,6 +1,6 @@
 <?php
 
-/* Files app 0.8.0
+/* Files app 0.8.1
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
@@ -123,7 +123,7 @@ class config {
   // app vars
   static $__dir__ = __DIR__;
   static $__file__ = __FILE__;
-  static $version = '0.8.0';
+  static $version = '0.8.1';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -912,9 +912,11 @@ function get_dirs($path = false, &$arr = array(), $depth = 0) {
   }
 
   // get dirs from files array if $data['files'] or glob subdirs
-  $subdirs = isset($data['files']) ? array_filter(array_map(function($file){
+  // disabled, because symlink absolute paths will mess up the menu, and it's not worth it.
+  /*$subdirs = isset($data['files']) ? array_filter(array_map(function($file) use ($path){
     return $file['filetype'] === 'dir' ? root_absolute($file['path']) : false;
-  }, $data['files'])) : glob(glob_escape($path) . '/*', GLOB_NOSORT|GLOB_ONLYDIR);
+  }, $data['files'])) : glob(glob_escape($path) . '/*', GLOB_NOSORT|GLOB_ONLYDIR);*/
+  $subdirs = glob(glob_escape($path) . '/*', GLOB_NOSORT|GLOB_ONLYDIR);
 
   // sort and loop subdirs
   if(!empty($subdirs)) foreach(get_menu_sort($subdirs) as $subdir) get_dirs($subdir, $arr, $depth + 1);
@@ -1937,6 +1939,13 @@ if(config::$config['allow_upload']) {
 
 // memory and time
 header('files-msg: [' . header_memory_time() . ']');
+
+
+//var_dump(get_dirs(config::$root)); exit;
+//print_r(get_dirs(config::$root)); exit;
+
+
+
 
 // main document html start
 get_header($init_path ? _basename($init_path) : '/', 'menu-' . ($menu_exists ? 'enabled' : 'disabled sidebar-closed')); ?>
