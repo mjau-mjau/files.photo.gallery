@@ -1,6 +1,6 @@
 <?php
 
-/* Files app 0.8.1
+/* Files Gallery 0.8.2
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
@@ -123,7 +123,7 @@ class config {
   // app vars
   static $__dir__ = __DIR__;
   static $__file__ = __FILE__;
-  static $version = '0.8.1';
+  static $version = '0.8.2';
   static $root;
   static $doc_root;
   static $has_login = false;
@@ -1939,13 +1939,6 @@ if(config::$config['allow_upload']) {
 
 // memory and time
 header('files-msg: [' . header_memory_time() . ']');
-
-
-//var_dump(get_dirs(config::$root)); exit;
-//print_r(get_dirs(config::$root)); exit;
-
-
-
 
 // main document html start
 get_header($init_path ? _basename($init_path) : '/', 'menu-' . ($menu_exists ? 'enabled' : 'disabled sidebar-closed')); ?>
