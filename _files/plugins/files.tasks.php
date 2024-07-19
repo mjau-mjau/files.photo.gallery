@@ -1,9 +1,17 @@
 <?php
 
-// ?task=
-// create_cache / menu / folders / images / all / force / dir / ignore_max_depth / time_limit
-// clear_cache / menu / folders / images / all / force / time_limit
-// create_html
+/* DOES NOT WORK! Needs to be updated for Files Gallery 0.9.0 */
+
+// Files Gallery tasks plugin, allows you to pre-create cache, clear cache, and more ...
+// this is not yet a public plugin ... ask in forum.files.gallery if you want to use and have questions
+
+// index.php?action=tasks&task=TASKNAME
+// EXAMPLE: index.php?action=tasks&task=clear_cache&images
+// TASKS: create_cache, clear_cache, create_html, download_assets
+// [create_cache] / menu / folders / images / all / force / dir / ignore_max_depth / time_limit
+// [clear_cache] / menu / folders / images / all / force / time_limit
+// [create_html]
+// [download_assets]
 
 // never cache
 header('expires: 0');
@@ -12,7 +20,7 @@ header('cache-control: post-check=0, pre-check=0', false);
 header('pragma: no-cache');
 
 // block direct access
-if(!class_exists('config')) exit('ERROR: Tasks plugin cannot be accessed directly!');
+if(!class_exists('Config')) exit('ERROR: Tasks plugin cannot be accessed directly!');
 
 // tasks
 Class tasks {
@@ -55,23 +63,26 @@ Class tasks {
 
   // set_memory_limit
   private function set_memory_limit(){
-    $memory_limit = get('memory_limit') ?: config::$config['image_resize_memory_limit'];
-    if($memory_limit && is_numeric($memory_limit) && $memory_limit > -1 && function_exists('ini_get') && $memory_limit > (int) @ini_get('memory_limit') && (!function_exists('ini_set') || !@ini_set('memory_limit', $memory_limit . 'M'))) error('Failed to set memory limit [' . $memory_limit . ']');
+    $memory_limit = U::get('memory_limit') ?: Config::get('image_resize_memory_limit');
+    if($memory_limit && is_numeric($memory_limit) && $memory_limit > -1 && function_exists('ini_get') && $memory_limit > (int) @ini_get('memory_limit') && (!function_exists('ini_set') || !@ini_set('memory_limit', $memory_limit . 'M'))) U::error('Failed to set memory limit [' . $memory_limit . ']');
   }
 
   // process
   function __construct() {
 
     // allow_tasks
-    $allow = config::$config['allow_tasks'];
-    if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !config::$has_login)) error('cannot!', 403);
+    $allow = Config::get('allow_tasks');
+    if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !Config::$has_login)) U::error('cannot!', 403);
 
     // assign task / 'create_cache', 'clear_cache', 'create_html'
-    self::$task = get('task');
+    self::$task = U::get('task');
 
     // check if tasks if available
     $tasks_array = ['create_cache', 'clear_cache', 'create_html', 'download_assets'];
-    if(!in_array(self::$task, $tasks_array)) error('Invalid task <strong>?task=' . (self::$task?:'') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
+    if(!in_array(self::$task, $tasks_array)) U::error('Invalid task <strong>?task=' . (self::$task?:'') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
+
+    // temp / tasks plugin does not yet work with Files Gallery index 0.9.0
+    if(self::$task !== 'create_html') exit('Tasks plugin does not yet work with Files Gallery index 0.9.0.');
 
     // assign tasks
     self::$force = self::isset('force');
@@ -84,17 +95,17 @@ Class tasks {
     if(self::$images) self::set_memory_limit();
 
     // increase time limit ?time_limit=300 (300 seconds, useful when resizing massive amounts of images)
-    $time_limit = get('time_limit');
+    $time_limit = U::get('time_limit');
     if($time_limit) set_time_limit(intval($time_limit));
 
     // get image resize types
     self::$resize_types = array_map(function($key){
       $type = trim(strtolower($key));
       return $type === 'jpg' ? 'jpeg' : $type;
-    }, explode(',', config::$config['image_resize_types']));
+    }, explode(',', Config::get('image_resize_types')));
 
     // video thumbs array if ffmpeg supported
-    self::$video_thumbs = config::$config['video_thumbs'] && config::$config['video_ffmpeg_path'] && @function_exists('exec') && @exec('type -P ' . config::$config['video_ffmpeg_path']) ? ['mp4', 'mkv', 'ogv', 'm4v', 'webm'] : false;
+    self::$video_thumbs = Config::get('video_thumbs') && Config::get('video_ffmpeg_path') && @function_exists('exec') && @exec('type -P ' . Config::get('video_ffmpeg_path')) ? ['mp4', 'mkv', 'ogv', 'm4v', 'webm'] : false;
   }
 }
 
@@ -105,25 +116,25 @@ new tasks();
 if(tasks::$task === 'download_assets'){
 
   // requirements
-  if(empty(config::$storage_path)) error('config::$storage_path is empty!', 400); // storage_path must exist
-  if(!class_exists('ZipArchive')) error('PHP ZipArchive class is required.', 400); // ZipArchive required to unzip downloaded assets.zip
-  if(!is_writable(__DIR__)) error(__DIR__ . ' is not writeable. Can\'t download.', 400); // must be able to write assets.zip to current dir
-  $assets_path = config::$storage_path . '/assets';
-  if(file_exists($assets_path) && !is_writable($assets_path)) error("$assets_path is not writeable!", 400); // $assets_path must be writeable
+  if(empty(Config::$storagepath)) U::error('Config::$storagepath is empty!', 400); // storage_path must exist
+  if(!class_exists('ZipArchive')) U::error('PHP ZipArchive class is required.', 400); // ZipArchive required to unzip downloaded assets.zip
+  if(!is_writable(__DIR__)) U::error(__DIR__ . ' is not writeable. Can\'t download.', 400); // must be able to write assets.zip to current dir
+  $assets_path = Config::$storagepath . '/assets';
+  if(file_exists($assets_path) && !is_writable($assets_path)) U::error("$assets_path is not writeable!", 400); // $assets_path must be writeable
 
   // attempt to download
   //$assets_download = 'http://files.test/npm/_files/assets/assets.zip';
-  $assets_download = 'https://cdn.jsdelivr.net/npm/files.photo.gallery@' . config::$version . '/_files/assets/assets.zip';
+  $assets_download = 'https://cdn.jsdelivr.net/npm/files.photo.gallery@0.8.4/_files/assets/assets.zip';
   $assets_downloaded = file_get_contents($assets_download);
-  if(empty($assets_downloaded)) error("Can't download <a href=\"$assets_download\">$assets_download</a>", 400); // failed to download
+  if(empty($assets_downloaded)) U::error("Can't download <a href=\"$assets_download\">$assets_download</a>", 400); // failed to download
 
   // write assets.zip temporarily into current __DIR__
   $assets_zip = __DIR__ . '/assets.zip';
-  if(empty(file_put_contents($assets_zip, $assets_downloaded))) error("Failed to write $assets_zip", 400);
+  if(empty(file_put_contents($assets_zip, $assets_downloaded))) U::error("Failed to write $assets_zip", 400);
 
   // unzip into _files/assets/*
   $zip = new \ZipArchive;
-  if(!$zip->open($assets_zip)) error("Failed to open $assets_zip", 400);
+  if(!$zip->open($assets_zip)) U::error("Failed to open $assets_zip", 400);
   $zip->extractTo($assets_path);
   $zip->close();
   unlink($assets_zip); // delete downloaded zip
@@ -133,20 +144,20 @@ if(tasks::$task === 'download_assets'){
 
 // task: create_html [beta]
 } else if(tasks::$task === 'create_html'){
-	if(config::$has_login) error('Cannot create html when login is enabled. Pointless!', 400);
+	if(Config::$has_login) U::error('Cannot create html when login is enabled. Pointless!', 400);
 	$time = time();
 	$url = 'http' . (!empty($_SERVER['HTTPS']) ? 's' : '' ) . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['PHP_SELF'] . '?index_html=' . $time;
 	$content = file_get_contents($url);
-  if(!$content) error("Failed to execute <strong>file_get_contents('$url')</strong>;", 500);
+  if(!$content) U::error("Failed to execute <strong>file_get_contents('$url')</strong>;", 500);
   $put = file_put_contents('index.html', '<!-- index_html ' . $time . ' -->' . PHP_EOL . preg_replace('/\s+/', ' ', $content));
-  if(!$put) error("Failed to execute <strong>file_put_contents('$url')</strong>;", 500);
+  if(!$put) U::error("Failed to execute <strong>file_put_contents('$url')</strong>;", 500);
   tasks::$output = "Successfully created <a href=\"./index.html?time=$time\">index.html</a> at $time";
 
 // task: create_cache [beta]
 } else if(tasks::$task === 'create_cache') {
 
   // early exit
-  if(!config::$config['cache']) exit('cache is disabled.');
+  if(!Config::get('cache')) exit('cache is disabled.');
 
   // create folders and images
   if(tasks::$folders || tasks::$images) {
@@ -155,7 +166,7 @@ if(tasks::$task === 'download_assets'){
     function create_cache($dir, $depth = 0){
 
       // skip dir
-      if(!is_readable($dir) || is_exclude($dir)) return 0;
+      if(!is_readable($dir) || Path::is_exclude($dir, true)) return 0;
 
       // dir cache path
       tasks::$folders_count ++;
@@ -171,12 +182,12 @@ if(tasks::$task === 'download_assets'){
         $arr = $cache_recreate ? get_dir($dir, true) : json_decode(file_get_contents($cache), true);
 
         // resize images
-        if(tasks::$images && config::$config['image_resize_enabled'] && config::$config['image_resize_cache'] && !empty($arr) && !empty($arr['files'])){
+        if(tasks::$images && Config::get('image_resize_enabled') && Config::get('image_resize_cache') && !empty($arr) && !empty($arr['files'])){
 
           //
           $dirs = array();
-          $image_sizes = array(config::$config['image_resize_dimensions']);
-          if(config::$image_resize_dimensions_retina) $image_sizes[] = config::$image_resize_dimensions_retina;
+          $image_sizes = array(Config::get('image_resize_dimensions'));
+          if(Config::$image_resize_dimensions_retina) $image_sizes[] = Config::$image_resize_dimensions_retina;
           foreach ($arr['files'] as $filename => $props) {
             if($props['filetype'] === 'dir'){
               $dirs[] = root_absolute($props['path']);
@@ -192,7 +203,7 @@ if(tasks::$task === 'download_assets'){
               // attempt to create if video thumb does not exist
               if(!file_exists($video_thumb_cache)) {
                 // ffmpeg command
-                $cmd = escapeshellarg(config::$config['video_ffmpeg_path']) . ' -i ' . escapeshellarg(real_path(root_absolute($props['path']))) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $video_thumb_cache . ' 2>&1';
+                $cmd = escapeshellarg(Config::get('video_ffmpeg_path')) . ' -i ' . escapeshellarg(real_path(root_absolute($props['path']))) . ' -deinterlace -an -ss 1 -t 1 -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg ' . $video_thumb_cache . ' 2>&1';
                 // try to execute command
                 @exec($cmd, $output, $result_code);
                 // fail if result_code is anything else than 0
@@ -214,7 +225,7 @@ if(tasks::$task === 'download_assets'){
             $original_height = $props['image'][($orientation > 4 && $orientation < 9 ? 'width' : 'height')];
 
             // image_resize_max_pixels early exit
-  					if(config::$config['image_resize_max_pixels'] && $original_width * $original_height > config::$config['image_resize_max_pixels']) continue;
+  					if(Config::get('image_resize_max_pixels') && $original_width * $original_height > Config::get('image_resize_max_pixels')) continue;
 
             // vars
             $type = $props['image']['type'];
@@ -225,7 +236,7 @@ if(tasks::$task === 'download_assets'){
 
               // ratio
               $ratio = max($original_width, $original_height) / $image_size;
-              if($ratio < max(config::$config['image_resize_min_ratio'], 1)) continue;
+              if($ratio < max(Config::get('image_resize_min_ratio'), 1)) continue;
 
               // cache path
               $image_cache = get_image_cache_path($path, $image_size, $props['filesize'], $props['mtime']);
@@ -251,7 +262,7 @@ if(tasks::$task === 'download_assets'){
 
                 // new image
                 $new_image = imagecreatetruecolor($new_width, $new_height);
-                call_user_func(config::$config['image_resize_function'], $new_image, $image, 0, 0, 0, 0, $new_width, $new_height, $original_width, $original_height);
+                call_user_func(Config::get('image_resize_function'), $new_image, $image, 0, 0, 0, 0, $new_width, $new_height, $original_width, $original_height);
 
                 // destroy original $image resource
   							imagedestroy($image);
@@ -260,17 +271,17 @@ if(tasks::$task === 'download_assets'){
   							exif_orientation($orientation, $new_image);
 
   							// sharpen resized image
-  							if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
+  							if(Config::get('image_resize_sharpen')) sharpen_image($new_image);
 
                 // save as cache
-                if(imagejpeg($new_image, $image_cache, config::$config['image_resize_quality'])) tasks::$images_processed ++;
+                if(imagejpeg($new_image, $image_cache, Config::get('image_resize_quality'))) tasks::$images_processed ++;
 
                 // detroy $new_image resource
                 imagedestroy($new_image);
               }
 
               // add image resize cache direct to $arr
-              if($cache_recreate && config::$image_resize_cache_direct) $arr['files'][$filename]['image']['resize' . $image_size] = get_url_path($image_cache);
+              if($cache_recreate && Config::$image_resize_cache_direct) $arr['files'][$filename]['image']['resize' . $image_size] = get_url_path($image_cache);
             }
           }
         }
@@ -283,7 +294,7 @@ if(tasks::$task === 'download_assets'){
       }
 
       // max depth
-      if(!tasks::isset('ignore_max_depth') && config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return;
+      if(!tasks::isset('ignore_max_depth') && Config::get('menu_max_depth') && $depth >= Config::get('menu_max_depth')) return;
 
       // subdirs
       if($get_dir){
@@ -302,23 +313,23 @@ if(tasks::$task === 'download_assets'){
     }
 
     // start create cache loop
-    $start_dir = get('dir');
+    $start_dir = U::get('dir');
     if($start_dir){
     	$start_dir = real_path($start_dir);
-    	if(!$start_dir) error('Dir does not exist <strong>dir=' . get('dir') . '</strong>', 404);
+    	if(!$start_dir) U::error('Dir does not exist <strong>dir=' . U::get('dir') . '</strong>', 404);
     }
-    create_cache($start_dir?:config::$root);
+    create_cache($start_dir ?: Config::$root);
   }
 
   // create menu
   if(tasks::$menu) {
     $menu_cache_hash = get_menu_cache_hash(get_root_dirs());
-    $menu_cache_file = config::$cache_path . DIRECTORY_SEPARATOR . 'menu' . DIRECTORY_SEPARATOR . $menu_cache_hash . '.json';
+    $menu_cache_file = Config::$cachepath . DIRECTORY_SEPARATOR . 'menu' . DIRECTORY_SEPARATOR . $menu_cache_hash . '.json';
     tasks::$menu_count = 1;
 
     // recreate menu
     if(tasks::$force || !get_valid_menu_cache($menu_cache_file)){
-      $menu_cache_arr = get_dirs(config::$root);
+      $menu_cache_arr = get_dirs(Config::$root);
       $menu_cache_json = empty($menu_cache_arr) ? '{}' : json_encode($menu_cache_arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
       if(file_put_contents($menu_cache_file, $menu_cache_json)) tasks::$menu_processed ++;
     }
@@ -334,7 +345,7 @@ if(tasks::$task === 'download_assets'){
 
   // get cache items
   function get_cache_items($dir, $ext){
-    $cache_path = config::$cache_path . DIRECTORY_SEPARATOR . $dir;
+    $cache_path = Config::$cachepath . DIRECTORY_SEPARATOR . $dir;
     if(!file_exists($cache_path)) return array();
     return glob($cache_path . '/*.' . $ext, GLOB_NOSORT);
   }
@@ -360,7 +371,7 @@ if(tasks::$task === 'download_assets'){
     tasks::$folders_count = count($dirs_cache_items);
     if(tasks::$folders_count){
       foreach ($dirs_cache_items as $dirs_cache_item) {
-        if(tasks::$force || strpos(basename($dirs_cache_item), config::$dirs_hash) !== 0) {
+        if(tasks::$force || strpos(basename($dirs_cache_item), Config::$dirs_hash) !== 0) {
           if(unlink($dirs_cache_item)) tasks::$folders_processed ++;
           continue;
         }
@@ -389,7 +400,7 @@ if(tasks::$task === 'download_assets'){
         }
         $image_cache_item_arr = explode('.', basename($image_cache_item));
         $resize_val = isset($image_cache_item_arr[3]) && is_numeric($image_cache_item_arr[3]) ? intval($image_cache_item_arr[3]) : false;
-        if(!$resize_val || !in_array($resize_val, [config::$config['image_resize_dimensions'], config::$image_resize_dimensions_retina])) {
+        if(!$resize_val || !in_array($resize_val, [Config::get('image_resize_dimensions'), Config::$image_resize_dimensions_retina])) {
           if(unlink($image_cache_item)) tasks::$images_processed ++;
         }
       }
@@ -399,6 +410,6 @@ if(tasks::$task === 'download_assets'){
 }
 
 // output
-header('files-msg: task [' . header_memory_time() . ']');
-if(!tasks::$output) error('No cache parameters selected [menu, folders, images, all]', 400);
+U::header('Tasks');
+if(!tasks::$output) U::error('No cache parameters selected [menu, folders, images, all]', 400);
 echo tasks::$output . '<br>-<br>Processed in ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . ' seconds.';

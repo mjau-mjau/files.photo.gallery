@@ -1,48 +1,98 @@
 <?php
 
-// Files app X3 login plugin @_files/plugins/files.x3-login.php / www.files.gallery
-// Uses X3 login credentials if Files app points to X3 'content' dir (normally '../content')
+// Files Gallery X3 login plugin @_files/plugins/files.x3-login.php / www.files.gallery
+// Gets and uses X3 login credentials if root points inside X3 'content'
 // If you want a public accessible Files app for your X3 content, just copy /files/index.php into /yourpublicdir/index.php
 
-// has_login true
-config::$has_login = true;
+// X3 login class
+class X3_login {
 
-// x3 config
-$x3_config_path = config::$x3_path . '/config/config.user.json';
-$x3_config = @file_exists($x3_config_path) && is_readable($x3_config_path) ? json_decode(file_get_contents($x3_config_path), true) : false;
-$x3_panel = !empty($x3_config) && isset($x3_config['back']['panel']) ? $x3_config['back']['panel'] : false;
+	// user-specific Files Gallery config (does not include default values) that shouldn't be overridden
+	private $user_config;
 
-// X3 panel database version
-if(!empty($x3_panel) && isset($x3_panel['use_db']) && $x3_panel['use_db']){
+	// get username and password from X3 config
+	public function __construct() {
 
-	// get X3Config class
-	if(!file_exists(config::$x3_path . '/app/x3.config.inc.php')) error('Can\'t find x3.config.inc.php.');
-	include config::$x3_path . '/app/x3.config.inc.php'; // include x3 config
-	$x3_panel = X3Config::$config['back']['panel']; // get full panel settings
+		// user-specific Files Gallery config (does not include default values)
+		$this->user_config = array_replace(Config::$storageconfig, Config::$localconfig);
 
-	// get login from DB
-	$mysqli = new mysqli($x3_panel['db_host'], $x3_panel['db_user'], $x3_panel['db_pass'], $x3_panel['db_name']);
-	if(!$mysqli || $mysqli -> connect_errno) error('Can\'t connect to X3 database.');
-	$login = mysqli_query($mysqli, 'select username, password from filemanager_db limit 1') -> fetch_row();
-	if(empty($login) || !is_array($login) || count($login) !== 2) error('Can\'t get username or password from database.');
-	config::$username = $login[0];
-	config::$password = $login[1];
+		// get X3 ['back']['panel'] config
+		$config = $this->get_config();
 
-// get login from config.user.json
-} else {
-	config::$username = !empty($x3_panel) && isset($x3_panel['username']) ? $x3_panel['username'] : 'admin';
-	config::$password = !empty($x3_panel) && isset($x3_panel['password']) ? $x3_panel['password'] : 'admin';
+		// get DB login if config use_db
+		if(!empty($config['use_db'])) {
+
+			// include full x3 config for DB details
+			include X3::path() . '/app/x3.config.inc.php';
+
+			// get full panel config
+			$panel = X3Config::$config['back']['panel'];
+
+			// new mysqli connection
+			$mysqli = new mysqli($panel['db_host'], $panel['db_user'], $panel['db_pass'], $panel['db_name']);
+
+			// mysqli connection error
+			if(empty($mysqli) || $mysqli->connect_errno) U::error('Can\'t connect to X3 database.');
+
+			// fetch login row
+			$row = mysqli_query($mysqli, 'select username, password from filemanager_db limit 1')->fetch_row();
+
+			// error missing username and/or password in database
+			if(empty($row) || !is_array($row) || count($row) !== 2) U::error('Can\'t get username or password from database.');
+
+			// assign username and password from database
+			$username = $row[0];
+			$password = $row[1];
+
+		// get non-db login / assign default 'admin' if empty
+		} else {
+			$username = !empty($config['username']) ? $config['username'] : 'admin';
+			$password = !empty($config['password']) ? $config['password'] : 'admin';
+		}
+
+		// assume full filemanager permissions when X3 login plugin is present and used
+		foreach ([
+			'upload',
+			'delete',
+			'rename',
+			'new_folder',
+			'new_file',
+			'duplicate',
+			'text_edit',
+			'zip',
+			'unzip',
+			'move',
+			'copy',
+			'mass_download',
+			'mass_copy_links'
+		] as $key) $this->set("allow_$key", true);
+
+
+		// exclude .json files as we don't want these visible
+		$this->set('files_exclude', '/\.json$/i');
+
+		// Assign demo_mode if X3 guest/guest or default admin/admin (because it's insecure)
+		if($username === $password && in_array($username, ['guest', 'admin'])) $this->set('demo_mode', true);
+
+		// assign username and password to Files Gallery config
+		$this->set('username', $username);
+		$this->set('password', $password);
+	}
+
+	// override Files Gallery config values, unless they are asigned in user config (config.php or _filesconfig.php)
+	private function set($key, $value){
+		if(isset($this->user_config[$key])) return;
+		Config::$config[$key] = $value;
+	}
+
+	// returns X3 ['back']['panel'] config array
+	private function get_config(){
+		$path = X3::path() . '/config/config.user.json';
+		if(!file_exists($path) || !is_readable($path)) return [];
+		$arr = json_decode(file_get_contents($path), true);
+		return !empty($arr['back']['panel']) ? $arr['back']['panel'] : [];
+	}
 }
 
-// assume full filemanager permissions, unless default admin/admin login (security)
-foreach (['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit'] as $key) config::$config['allow_' . $key] = true;
-
-// exclude .json files
-config::$config['files_exclude'] = '/\.json$/i';
-
-// Assign demo_mode if X3 guest/guest or default admin/admin (insecure)
-if((config::$username === 'guest' && config::$password === 'guest') || 
-	(config::$username === 'admin' && config::$password === 'admin')) config::$config['demo_mode'] = true;
-
-
-
+//
+new X3_login();

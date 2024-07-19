@@ -1,30 +1,42 @@
 <?php
 
-/* Files Gallery 0.8.4
+/* Files Gallery 0.9.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
-This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files. */
+This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
+---
+class Config        / load config with static methods to access config options
+class Login         / check and manage logins
+class U             / static utility functions
+class Path          / static functions to convert and validate file paths
+class Json          / JSON response functions
+class X3            / helper functions when running Files Gallery alongside X3 www.photo.gallery
+class Tests         / outputs PHP, server and config diagnostics by url ?action=tests
+class FileResponse  / outputs file, video preview image, resized image and proxies any file by PHP
+class ResizeImage   / serves a resized image
+class Dirs          / outputs menu json from dir structure
+class Dir           / loads data array for a single dir
+class File          / returns data array for a single file
+class Iptc          / extract IPTC image data from images
+class Exif          / extract Exif image data from images
+class Filemanager   / functions that handle file operations on server
+class Zipper        / create and extract zip files
+class Request       / extract parameters for all actions
+class Document      / creates the main Files Gallery document response
+*/
 
-// so that basename() and other functions work correctly on multi-byte strings.
-setlocale(LC_ALL,'en_US.UTF-8');
 
-// config
-class config {
+// class Config / constructor and static methods to access config options
+class Config {
 
-  // CONFIG / [READ MORE] https://www.files.gallery/docs/config/
-  // Only edit directly if it is a temporary installation. Settings added here will be lost when updating!
-  // Instead, add options from external config file in your storage_path [_files/config/config.php]
-  public static $default = array(
-
-    // paths
+  // config defaults / https://www.files.gallery/docs/config/
+  // Only edit directly here if it is a temporary installation. Settings here will be lost when updating!
+  // Instead, add options into external config file in your storage_path _files/config/config.php (generated on first run)
+  private static $default = [
     'root' => '',
     'start_path' => false,
-
-    // login
     'username' => '',
     'password' => '',
-
-    // images
     'load_images' => true,
     'load_files_proxy_php' => false,
     'load_images_max_filesize' => 1000000,
@@ -37,14 +49,12 @@ class config {
     'image_resize_quality' => 85,
     'image_resize_function' => 'imagecopyresampled',
     'image_resize_sharpen' => true,
-    'image_resize_memory_limit' => 128,
-    'image_resize_max_pixels' => 30000000,
+    'image_resize_memory_limit' => 256,
+    'image_resize_max_pixels' => 60000000,
     'image_resize_min_ratio' => 1.5,
     'image_resize_cache_direct' => false,
     'folder_preview_image' => true,
     'folder_preview_default' => '_filespreview.jpg',
-
-    // menu
     'menu_enabled' => true,
     'menu_show' => true,
     'menu_max_depth' => 5,
@@ -52,24 +62,16 @@ class config {
     'menu_cache_validate' => true,
     'menu_load_all' => false,
     'menu_recursive_symlinks' => true,
-
-    // files layout
     'layout' => 'rows',
     'sort' => 'name_asc',
     'sort_dirs_first' => true,
     'sort_function' => 'locale',
-
-    // cache
     'cache' => true,
     'cache_key' => 0,
     'storage_path' => '_files',
-
-    // exclude files directories regex
     'files_exclude' => '',
     'dirs_exclude' => '',
     'allow_symlinks' => true,
-
-    // various
     'title' => '%name% [%count%]',
     'history' => true,
     'transitions' => true,
@@ -78,8 +80,6 @@ class config {
     'click_window_popup' => true,
     'code_max_load' => 100000,
     'topbar_sticky' => 'scroll',
-    'check_updates' => false,
-    'allow_tasks' => false,
     'get_mime_type' => false,
     'context_menu' => true,
     'prevent_right_click' => false,
@@ -89,8 +89,6 @@ class config {
     'download_dir' => 'browser',
     'download_dir_cache' => 'dir',
     'assets' => '',
-
-    // filemanager options
     'allow_upload' => false,
     'allow_delete' => false,
     'allow_rename' => false,
@@ -98,1916 +96,2757 @@ class config {
     'allow_new_file' => false,
     'allow_duplicate' => false,
     'allow_text_edit' => false,
+    'allow_zip' => false,
+    'allow_unzip' => false,
+    'allow_move' => false,
+    'allow_copy' => false,
+    'allow_download' => true,
+    'allow_mass_download' => false,
+    'allow_mass_copy_links' => false,
+    'allow_check_updates' => false,
+    'allow_tests' => true,
+    'allow_tasks' => false,
     'demo_mode' => false,
-
-    // uploader options
     'upload_allowed_file_types' => '',
     'upload_max_filesize' => 0,
     'upload_exists' => 'increment',
-
-    // popup options
     'popup_video' => true,
-
-    // video
     'video_thumbs' => true,
     'video_ffmpeg_path' => 'ffmpeg',
-
-    // language
     'lang_default' => 'en',
-    'lang_auto' => true,
-  );
+    'lang_auto' => true
+  ];
 
-  // config (will popuplate)
-  public static $config = array();
+  // global application variables created on new Config()
+  public static $version = '0.9.0';   // Files Gallery version
+  public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
+  public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
+  public static $localconfig = [];    // config array from localconfigpath
+  public static $storagepath;         // absolute storage path for cache, config, plugins and more, normally _files dir
+  public static $storageconfigpath;   // absolute path to storage config, normally _files/config/config.php
+  public static $storageconfig = [];  // config array from storage path, normally _files/config/config.php
+  public static $cachepath;           // absolute cache path shortcut
+  public static $__dir__;             // absolute __DIR__ path with normalized OS path
+  public static $__file__;            // absolute __FILE__ path with normalized OS path
+  public static $root;                // absolute root path interpolated from config root option, normally current dir
+  public static $document_root;       // absolute server document root with normalized OS path
+  public static $has_login;           // detect if there application has login
+  public static $created = [];        // checks what dirs and files get created by config on ?action=tests
 
-  // app vars
-  static $__dir__ = __DIR__;
-  static $__file__ = __FILE__;
-  static $version = '0.8.4';
-  static $root;
-  static $doc_root;
-  static $has_login = false;
-  static $storage_path;
-  static $storage_is_within_doc_root = false;
-  static $storage_config_realpath;
-  static $storage_config;
-  static $cache_path;
-  static $image_resize_cache_direct;
-  static $image_resize_dimensions_retina = false;
-  static $dirs_hash = false;
-  static $local_config_file = '_filesconfig.php';
-  static $username = false;
-  static $password = false;
-  static $x3_path = false;
-  static $assets;
+  // config construct created static app vars and merge configs
+  public function __construct() {
 
-  // get config
-  private function get_config($path) {
-    if(empty($path) || !file_exists($path)) return array();
+    // get absolute __DIR__ and __FILE__ paths with normalized OS paths
+    self::$__dir__ = Path::realpath(__DIR__);
+    self::$__file__ = Path::realpath(__FILE__);
+
+    // load local config _filesconfig.php if exists
+    self::$localconfig = $this->load(self::$localconfigpath);
+
+    // create initial config array from default and localconfig
+    self::$config = array_replace(self::$default, self::$localconfig);
+
+    // set absolute storagepath, create storage dirs if required, and load, create or update storage config.php
+    $this->storage();
+
+    // assign public real root path
+    self::$root = Path::realpath(self::get('root'));
+
+    // error if root path does not exist
+    if(!self::$root) U::error('root dir <b>' . self::get('root') . '</b> does not exist');
+
+    // storagepath can't be the same as root dir, because storage_path is excluded
+    if(self::$storagepath === self::$root) U::error('storage_path can\'t be the same as root');
+
+    // get server document root with normalized OS path
+    self::$document_root = Path::realpath($_SERVER['DOCUMENT_ROOT']);
+
+    // assign public $has_login if username or password or X3 login (plugin)
+    self::$has_login = self::get('username') || self::get('password') || X3::login();
+  }
+
+  // public shortcut function to get config option Config::get('option')
+  public static function get($option){
+    return self::$config[$option];
+  }
+
+  // load a config file and trim values / returns empty array if file doesn't exist
+  private function load($path) {
+    if(empty($path) || !file_exists($path)) return [];
     $config = include $path;
-    return empty($config) || !is_array($config) ? array() : array_map(function($v){
+    if(empty($config) || !is_array($config)) return [];
+    return array_map(function($v){
       return is_string($v) ? trim($v) : $v;
     }, $config);
   }
 
-  // files check system and config [diagnostics]
-  private function files_check($local_config, $storage_path, $storage_config, $user_config, $user_valid){
+  // set storagepath from config, create dir if necessary
+  private function storage(){
+
+    // ignore storagepath and disable cache settings if storage_path is specifically set to FALSE
+    if(self::get('storage_path') === false) {
+      foreach (['cache', 'image_resize_cache', 'folder_preview_image'] as $key) self::$config[$key] = false;
+      return;
+    }
+
+    // shortcut to config storage_path
+    $path = rtrim(self::get('storage_path'), '\/');
+
+    // invalid config storage_path can't be empty or non-string
+    if(!$path || !is_string($path)) U::error('Invalid storage_path parameter');
+
+    // get request ?action if any, to determine if we attempt to make dirs and files on config construct
+    $action = U::get('action');
+
+    // if ?action=tests, check what dirs and files will get created, for tests output
+    if($action === 'tests') {
+      foreach (['', '/config', '/config/config.php', '/cache/images', '/cache/folders', '/cache/menu'] as $key) {
+        if(!file_exists($path . $key)) self::$created[] = $path . $key;
+      }
+    }
+
+    // only make dirs and config if main document (no ?action, except action tests)
+    $make = !$action || $action === 'tests';
+
+    // make storage path dir if it doesn't exist or return error
+    if($make) U::mkdir($path);
+
+    // store absolute storagepath
+    self::$storagepath = Path::realpath($path);
+
+    // error in case storagepath still doesn't seem to exist from realpath()
+    if(!self::$storagepath) U::error('storage_path does not exist and can\'t be created');
+
+    // absolute cache path shortcut
+    self::$cachepath = self::$storagepath . '/cache';
+
+    // assign storage config path (normally */_files/config/config.php), from where we load config and save options
+    self::$storageconfigpath = self::$storagepath . '/config/config.php';
+
+    // load storage config (normally _files/config/config.php) or return empty array
+    self::$storageconfig = $this->load(self::$storageconfigpath);
+
+    // if storage config is not empty, update config by merging default, storageconfig and localconfig
+    if(!empty(self::$storageconfig)) self::$config = array_replace(self::$default, self::$storageconfig, self::$localconfig);
+
+    // only make storage dirs and config.php if main document or ?action=tests
+    if(!$make) return;
+
+    // create required storage dirs if they don't exist / error on fail
+    foreach (['config', 'cache/images', 'cache/folders', 'cache/menu'] as $dir) U::mkdir(self::$storagepath . '/' . $dir);
+
+    // create or update config file if older than index.php
+    if(!file_exists(self::$storageconfigpath) || filemtime(self::$storageconfigpath) < filemtime(__FILE__)) self::save();
+  }
+
+  // save to config.php in storagepath (normally _files/config/config.php) or create new config.php if file doesn't exist
+  public static function save($options = []){
+
+    // merge array of parameters with current storageconfig, and intersect with default, to remove invalida/outdated options
+    $save = array_intersect_key(array_replace(self::$storageconfig, $options), self::$default);
+
+    // create exported array string with save values merged into default values, all commented out
+    $export = preg_replace("/  '/", "  //'", var_export(array_replace(self::$default, $save), true));
+
+    // loop save options and un-comment options where values differ from default options (for convenience, only store differences)
+    foreach ($save as $key => $value) if($value !== self::$default[$key]) $export = str_replace("//'" . $key, "'" . $key, $export);
+
+    // write formatted config array to config (normally _files/config/config.php)
+    return @file_put_contents(self::$storageconfigpath, '<?php ' . PHP_EOL . PHP_EOL . '// CONFIG / https://www.files.gallery/docs/config/' . PHP_EOL . '// Uncomment the parameters you want to edit.' . PHP_EOL . 'return ' . $export . ';');
+  }
+}
+
+// class Login / check and manage logins
+class Login {
+
+  // vars
+  private $username;    // config username
+  private $password;    // config password
+  private $is_logout;   // is_logout gets assigned when user logs out
+  private $client_hash; // hash unique to client and install location, must match on login from form
+  private $login_hash;  // unique hash for $_SESSION['login']
+  private $sidmd5;      // encrypted session ID to compare on login
+
+  // start new login check
+  public function __construct() {
+
+    // assign $username and $password shortcuts from config
+    $this->username = Config::get('username');
+    $this->password = Config::get('password');
+
+    // make sure username or password is not empty
+    foreach (['username', 'password'] as $key) if(!$this->{$key}) U::error("$key can't be empty");
+
+    // PHP session_start() or error
+    if(session_status() === PHP_SESSION_NONE && !session_start()) U::error('Failed to initiate PHP session_start()', 500);
+
+    // create a unique client hash specific to install location, must match on login from login form
+    $this->client_hash = md5($this->ip() . $this->server('HTTP_USER_AGENT') . __FILE__ . $this->server('HTTP_HOST'));
+
+    // create a unique login hash used for $_SESSION['login']
+    $this->login_hash = md5($this->username . $this->password . $this->client_hash);
+
+    // return to app if user is already logged in
+    if($this->is_logged_in()) return;
+
+    // exit with error on ?action requests (is not login attempt, and don't show login form)
+    if($this->unauthorized()) return;
+
+    // get md5() hashed version of session ID, to compare from login form on login
+    $this->sidmd5 = md5(session_id());
+
+    // verify login (may or may not be login attempt) or show form
+    if(!$this->verify_login()) return $this->form();
+
+    // on successful login, store $_SESSION['login'] as login_hash
+    return $_SESSION['login'] = $this->login_hash;
+  }
+
+  // get client IP for unique client_hash
+  private function ip(){
+    foreach(['HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR'] as $key){
+      $ip = explode(',', $this->server($key))[0];
+      if($ip && filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+    }
+    return ''; // return empty string if nothing found
+  }
+
+  // get $_SERVER parameters or empty string
+  private function server($str){
+    return isset($_SERVER[$str]) ? $_SERVER[$str] : '';
+  }
+
+  // check if user session is already logged in
+  private function is_logged_in(){
+
+    // false if session does not match
+    if(!isset($_SESSION['login']) || $_SESSION['login'] != $this->login_hash) return;
+
+    // logged in, if action is not logout
+    if(!U::get('logout')) return true;
+
+    // logout action, return false
+    $this->is_logout = true;
+    unset($_SESSION['login']);
+    return;
+  }
+
+  // exit with error on ?action request (is not login attempt, and don't show login form)
+  private function unauthorized(){
+
+    // return to verify login if !action or action is tests
+    if(!U::get('action') || U::get('action') === 'tests') return;
+
+    // return json error if request is POST
+    if($_SERVER['REQUEST_METHOD'] === 'POST') return Json::error('login');
+
+    // login error with login link
+    U::error('Please <a href="' . strtok($_SERVER['REQUEST_URI'], '?') . '">login</a> to continue', 401);
+  }
+
+  // verify a login attempt
+  private function verify_login(){
+
+    // false if client_hash from form does not match
+    if(U::post('client_hash') != $this->client_hash) return;
+
+    // false if sidmd5 from form does not match
+    if(U::post('sidmd5') != $this->sidmd5) return;
+
+    // false if username from form does not match
+    if($this->lower(trim(U::post('fusername'))) != $this->lower($this->username)) return;
+
+    // trim form password
+    $fpassword = trim(U::post('fpassword'));
+
+    // use password_verify() to verify, if password is encrypted with password_hash() (most secure)
+    if(function_exists('password_needs_rehash') && !password_needs_rehash($this->password, PASSWORD_DEFAULT)) return password_verify($fpassword, $this->password);
+
+    // verify vs non-encrypted password or if password was stored with md5
+    return $fpassword === $this->password || md5($fpassword) === $this->password;
+  }
+
+  // lowercase username for case-insensitive username validation uses mb_strtolower() if function exists
+  private function lower($str){
+    return function_exists('mb_strtolower') ? mb_strtolower($str) : strtolower($str);
+  }
+
+  // login page / output form html and exit
+  private function form($login = false) {
+
+    // get login form page header
+    U::html_header('Login', 'page-login');
+
+    // login page html / block basic bots by injecting form via javascript
+    ?><body class="page-login-body">
+      <article class="login-container"></article>
+    </body>
+    <script>
+      document.querySelector('.login-container').innerHTML = '\
+      <h1>Login</h1>\
+      <?php echo $this->form_alert(); ?>
+      <form class="login-form">\
+        <input type="text" class="input" name="fusername" placeholder="Username" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">\
+        <input type="password" class="input" name="fpassword" placeholder="Password" required spellcheck="false" autocomplete="off">\
+        <input type="hidden" name="client_hash" value="<?php echo $this->client_hash; ?>">\
+        <input type="hidden" name="sidmd5" value="<?php echo $this->sidmd5; ?>">\
+        <button type="submit" class="button">Login</button>\
+      </form>';
+      document.querySelector('.login-form').addEventListener('submit', (e) => {
+        document.body.classList.add('form-loading');
+        e.currentTarget.action = '<?php echo U::get('logout') ? strtok($_SERVER['REQUEST_URI'], '?') : $_SERVER['REQUEST_URI']; ?>';
+        e.currentTarget.method = 'post';
+      }, false);
+    </script>
+    </html><?php exit; // end form and exit
+  }
+
+  // outputs an alert in login form on logout, incorrect login or session ID mismatch
+  private function form_alert(){
+
+    // logout alert if was logout operation
+    if($this->is_logout) return '<div class="alert alert-warning" role="alert">You are now logged out</div>';
+
+    // no alert if is not a login attempt
+    if(!U::post('sidmd5')) return '';
+
+    // sidmd5 does not match
+    if(U::post('sidmd5') !== $this->sidmd5) return '<div class="alert alert-danger" role="alert">PHP session ID mismatch</div>';
+
+    // incorrect login alert
+    return '<div class="alert alert-danger" role="alert">Incorrect login</div>';
+  }
+}
+
+// class U / static utility functions (short U because I want compact function access)
+class U {
+
+  // get file basename / basically just a wrapper in case it needs to be refined on some servers
+  public static function basename($path){
+    return basename($path); // because setlocale(LC_ALL,'en_US.UTF-8')
+    // OPTIONAL: replace basename() which may fail on UTF-8 chars if locale != UTF8
+    //$arr = explode('/', str_replace('\\', '/', $path));
+    //return end($arr);
+  }
+
+  // get mime type for file
+  public static function mime($path){
+    if(function_exists('mime_content_type')) return mime_content_type($path);
+    if(function_exists('finfo_file')) return finfo_file(finfo_open(FILEINFO_MIME_TYPE), $path);
+    return false;
+  }
+
+  // get file extension with options to lowercase and include dot
+  public static function extension($path, $lowercase = false, $dot = false) {
+  	$ext = pathinfo($path, PATHINFO_EXTENSION);
+  	if(!$ext) return '';
+  	if($lowercase) $ext = strtolower($ext);
+  	if($dot) $ext = '.' . $ext;
+  	return $ext;
+  }
+
+  // glob() wrapper for reading paths / escape [brackets] in folder names (it's complicated)
+  public static function glob($path, $dirs_only = false){
+    if(preg_match('/\[.+]/', $path)) $path = str_replace(['[',']', '\[', '\]'], ['\[','\]', '[[]', '[]]'], $path);
+    return @glob($path, $dirs_only ? GLOB_NOSORT|GLOB_ONLYDIR : GLOB_NOSORT);
+  }
+
+  // get $_POST parameter or false
+  public static function post($param){
+  	return isset($_POST[$param]) && !empty($_POST[$param]) ? $_POST[$param] : false;
+  }
+
+  // get $_GET parameter or false
+  public static function get($param){
+  	return isset($_GET[$param]) && !empty($_GET[$param]) ? $_GET[$param] : false;
+  }
+
+  // make dir unless it already exists, error if fail
+  public static function mkdir($path){
+    if(!file_exists($path) && !mkdir($path, 0777, true)) U::error('Failed to create ' . $path, 500);
+  }
+
+  // helper function to check for and include various files html, php, css and js from storage_path _files/*
+  public static function include($file){
+    if(!Config::$storagepath) return;
+    $path = Config::$storagepath . '/' . $file;
+    if(!file_exists($path)) return;
+    $ext = U::extension($path);
+    if(in_array($ext, ['html', 'php'])) return include $path;
+    $src = Path::urlpath($path); // get urlpath for public resource
+    if(!$src) return; // return if storagepath is non-public (not inside document root)
+    $src .= '?' . filemtime($path); // append modified time of file, so updated resources don't get cached in browser
+    if($ext === 'js') echo '<script src="' . $src . '"></script>';
+    if($ext === 'css') echo '<link href="' . $src . '" rel="stylesheet">';
+  }
+
+  // attempt to ini_get($directive)
+  public static function ini_get($directive){
+    $val = function_exists('ini_get') ? @ini_get($directive) : false;
+    return is_string($val) ? trim($val) : $val;
+  }
+
+  // get php ini value to bytes
+  public static function ini_value_to_bytes($directive) {
+    $val = U::ini_get($directive);
+    if(empty($val) || !is_string($val)) return 0;
+    if(function_exists('ini_parse_quantity')) return @ini_parse_quantity($val) ?: 0;
+  	if(!preg_match('/^(\d+)([G|M|K])?$/i', trim($val), $m)) return 0;
+  	if(!isset($m[2])) return (int) $m[1];
+  	return (int) $m[1] *= ['G' => 1024 * 1024 * 1024, 'M' => 1024 * 1024, 'K' => 1024][strtoupper($m[2])];
+  }
+
+  // get memory limit in MB, if available, so we can calculate memory for image resize operations
+  public static function get_memory_limit_mb() {
+    $val = U::ini_value_to_bytes('memory_limit');
+    return $val ? $val / 1024 / 1024 : 0; // convert bytes to M
+  }
+
+  // detect FFmpeg availability for video thumbnails and return path or false / https://ffmpeg.org/
+  public static function ffmpeg_path(){
+
+    // below config options must be enabled for FFmpeg to apply
+    foreach (['video_thumbs', 'load_images', 'image_resize_cache', 'video_ffmpeg_path'] as $key) if(!Config::get($key)) return;
+
+    // exec() must be available to access command-line FFmpeg
+    if(!function_exists('exec')) return;
+
+    // path to ffmpeg in command-line is normally just 'ffmpeg', but escapeshellarg() in case using absolute path
+    $path = escapeshellarg(Config::get('video_ffmpeg_path'));
+    //$path = '"' . str_replace('"', '\"', Config::get('video_ffmpeg_path')) . '"'; // <- if path contains Chinese chars
+
+    // attempt to run -version function on ffmpeg and return the path or false on fail
+    return @exec($path . ' -version') ? $path : false;
+  }
+
+  // readfile() wrapper function to output file with tests, clone option and headers
+  public static function readfile($path, $mime, $message = false, $cache = false, $clone = false){
+    if(!$path || !file_exists($path)) return false;
+    if($clone && @copy($path, $clone)) U::message('cloned to ' . U::basename($clone));
+    U::header($message, $cache, $mime, filesize($path), 'inline', U::basename($path));
+    if(!is_readable($path) || readfile($path) === false) U::error('Failed to read file ' . U::basename($path), 400);
+    exit;
+  }
+
+  // return an array of supported image resize types / used by Javascript to determine what resized image types can be requested
+  public static function resize_image_types(){
+    return array_merge(['jpeg', 'jpg', 'png', 'gif'], array_filter(['webp', 'bmp', 'avif'], function($type){
+      return function_exists('imagecreatefrom' . $type);
+    }));
+  }
+
+  // common error response with response code, error message and json option
+  // 400 Bad Request, 403 Forbidden, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
+  public static function error($error = 'Error', $http_response_code = false, $is_json = false){
+    if($is_json) return Json::error($error);
+    if($http_response_code) http_response_code($http_response_code);
+    U::header("[ERROR] $error", false);
+  	exit("<h3>Error</h3>$error.");
+  }
+
+  // get dirs hash based on various options for cache paths and browser localstorage / with cached response
+  private static $dirs_hash;
+  public static function dirs_hash(){
+    if(self::$dirs_hash) return self::$dirs_hash;
+    return self::$dirs_hash = substr(md5(Config::$document_root . Config::$__dir__ . Config::$root . Config::$version .  Config::get('cache_key') . U::image_resize_cache_direct() . Config::get('files_exclude') . Config::get('dirs_exclude')), 0, 6);
+  }
+
+  // check if image_resize_cache_direct is enabled for direct access to resized image cache files / with cached response
+  private static $image_resize_cache_direct;
+  public static function image_resize_cache_direct(){
+    if(isset(self::$image_resize_cache_direct)) return self::$image_resize_cache_direct;
+    return self::$image_resize_cache_direct = Config::get('image_resize_cache_direct') && !Config::$has_login && Config::get('load_images') && Config::get('image_resize_cache') && Config::get('image_resize_enabled') && Path::is_within_docroot(Config::$storagepath);
+  }
+
+  // image_resize_dimensions_retina (serve larger dimension resized images for HiDPI screens) with cached response
+  private static $image_resize_dimensions_retina;
+  public static function image_resize_dimensions_retina(){
+    if(isset(self::$image_resize_dimensions_retina)) return self::$image_resize_dimensions_retina;
+    $retina = intval(Config::get('image_resize_dimensions_retina'));
+    return self::$image_resize_dimensions_retina = $retina > Config::get('image_resize_dimensions') ? $retina : false;
+  }
+
+  // get common html header for main document and login page
+  public static function html_header($title, $class){
+  ?>
+  <!doctype html><!-- www.files.gallery -->
+  <html class="<?php echo $class; ?>" data-theme="contrast">
+    <script>
+    let theme = (() => {
+      try {
+        return localStorage.getItem('files:theme');
+      } catch (e) {
+        return false;
+      };
+    })() || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'contrast');
+    if(theme !== 'contrast') document.documentElement.dataset.theme = theme;
+    </script>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta name="robots" content="noindex, nofollow">
+      <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAD1BMVEUui1f///9jqYHr9O+fyrIM/O8AAAABIklEQVR42u3awRGCQBBE0ZY1ABUCADQAoEwAzT8nz1CyLLszB6p+B8CrZuDWujtHAAAAAAAAAAAAAAAAAACOQPPp/2Y0AiZtJNgAjTYzmgDtNhAsgEkyrqDkApkVlsBDsq6wBIY4EIqBVuYVFkC98/ycCkr8CbIr6MCNsyosgJvsKxwFQhEw7APqY3mN5cBOnt6AZm/g6g2o8wYqb2B1BQcgeANXb0DuwOwNdKcHLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeA20mArmB6Ugg0NsCcP/9JS8GAKSlVZMBk8p1GRgM2R4jMHu51a/2G1ju7wfoNrYHyCtUY3zpOthc4MgdNy3N/0PruC/JlVAwAAAAAAAAAAAAAAABwZuAHuVX4tWbMpKYAAAAASUVORK5CYII=">
+      <meta name="apple-mobile-web-app-capable" content="yes">
+      <title><?php echo $title; ?></title>
+      <?php U::include('include/head.html'); ?>
+      <link href="<?php echo U::assetspath(); ?>files.photo.gallery@<?php echo Config::$version ?>/css/files.css" rel="stylesheet">
+      <?php U::include('css/custom.css'); ?>
+    </head>
+  <?php
+  }
+
+  // output file as download using correct headers and readfile() / used to download zip and force download single files
+  public static function download($file, $message, $mime, $filename){
+    U::header($message, false, $mime, filesize($file), 'attachment', $filename);
+    while (ob_get_level()) ob_end_clean();
+    return readfile($file) !== false;
+  }
+
+  // assign assets url for plugins, Javascript, CSS and languages, defaults to CDN https://www.jsdelivr.com/
+  // if you want to self-host assets: https://www.files.gallery/docs/self-hosted-assets/
+  private static $assetspath;
+  public static function assetspath(){
+    if(self::$assetspath) return self::$assetspath;
+    return self::$assetspath = Config::get('assets') ? rtrim(Config::get('assets'), '/') . '/' : 'https://cdn.jsdelivr.net/npm/';
+  }
+
+  // response headers
+
+  // cache time 1 year for cacheable assets / can be modified if you really need to
+  public static $cache_time = 31536000;
+
+  // array of messages to go into files-response header
+  private static $messages = [];
+
+  // add messages (string or array) to files-response header
+  public static function message($items = []){
+    self::$messages = array_merge(self::$messages, is_string($items) ? [$items] : array_filter($items));
+  }
+
+  // set request response headers, including files-message header for diagnosing response
+  public static function header($message, $cache = null, $type = false, $length = 0, $disposition = false, $filename = ''){
+
+    // prepend main $message to $messages array
+    if($message) array_unshift(self::$messages, $message);
+
+    // append PHP response time to $messages
+    if(isset($_SERVER['REQUEST_TIME_FLOAT'])) self::$messages[] = round(microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'], 3) . 's';
+
+    // append memory usage to $messages
+    if(function_exists('memory_get_peak_usage')) self::$messages[] = round(memory_get_peak_usage() / 1048576, 1) . 'M';
+
+    // assign files-message header with all $messages
+    header('files-response: ' . implode(' | ', self::$messages));
+
+    // cache response headers
+    if($cache){
+      $shared = Config::$has_login ? 'private' : 'public'; // private or shared cache depending on login
+      header('expires: ' . gmdate('D, d M Y H:i:s \G\M\T', time() + self::$cache_time));
+      header('cache-control: ' . $shared . ', max-age=' . self::$cache_time . ', s-maxage=' . self::$cache_time . ', immutable');
+
+    // no cache response headers if specifically set to false (if null, don't do anything)
+    } else if($cache === false){
+      header('cache-control: no-store, must-revalidate');
+    }
+
+    // assign content-type header
+    if($type) header("content-type: $type");
+
+    // assign content-length header / only assigned when reading actual files on disk when we can get filesize()
+    if($length) header("content-length: $length");
+
+    // assign content-disposition when reading files on disk, assigned to either 'inline' or 'attachment'
+    if($disposition) header('content-disposition: ' . $disposition . '; filename="' . addslashes($filename) . '"');
+  }
+}
+
+// class Path / various static functions to convert and validate file paths
+class Path {
+
+  // returns resolved absolute paths and normalizes slashes across OS / returns false if file does not exist
+  public static function realpath($path){
+    $realpath = realpath($path);
+    return $realpath ? str_replace('\\', '/', $realpath) : false;
+  }
+
+  // get absolute path by appending relative path to root path (does not resolve symlinks)
+  public static function rootpath($relpath){
+    return Config::$root . (strlen($relpath) ? "/$relpath" : ''); // check paths with strlen() in case dirname is '0'
+  }
+
+  // get relative path from full root path / used as internal reference and in query ?path/path
+  public static function relpath($path){
+    return trim(substr($path, strlen(Config::$root)), '\/');
+  }
+
+  // get public url path relative to script or server document root
+  public static function urlpath($path){
+
+    // return if item is not within server document root, because it can't be accessed by www url
+    if(!self::is_within_docroot($path)) return false;
+
+    // if item is within application dir, we can return relative path
+    if(self::is_within_path($path, Config::$__dir__)) return $path === Config::$__dir__ ? '.' : substr($path, strlen(Config::$__dir__) + 1);
+
+    // return root-relative path
+    return $path === Config::$document_root ? '/' : substr($path, strlen(Config::$document_root));
+  }
+
+  // determines if a path is equal to or inside another path / append slash so that path/dirx/ does not match path/dir/
+  public static function is_within_path($path, $root){
+    return $path && strpos($path . '/', $root . '/') === 0;
+  }
+
+  // determines if path is within server document root (so we can determine if it's accessible by URL)
+  public static function is_within_docroot($path){
+    return $path && self::is_within_path($path, Config::$document_root);
+  }
+
+  // calculate path for image resize cache
+  public static function imagecachepath($path, $image_resize_dimensions, $filesize, $filemtime){
+    return Config::$cachepath . '/images/' . substr(md5($path), 0, 6) . ".$filesize.$filemtime.$image_resize_dimensions.jpg";
+  }
+
+  // determines if relative path is valid, and returns full rootpath or false if invalid
+  public static function valid_rootpath($relpath, $is_dir = false){
+
+    // invalid if path is false (might be previously unresolved)
+    if($relpath === false) return;
+
+    // invalid if is file and path is empty (path can be '' empty string for root dir)
+    if(!$is_dir && empty($relpath)) return;
+
+    // relative path should never start or end with slash/
+    if(preg_match('/^\/|\/$/', $relpath)) return;
+
+    // get root path from relative path
+    $rootpath = self::rootpath($relpath);
+
+    // realpath may differ from rootpath if symlinked or if relpath contains parent ../ paths
+    $realpath = self::realpath($rootpath);
+
+    // invalid if file does not exist
+    if(!$realpath) return;
+
+    // additional security checks if realpath differs from rootpath, and realpath is no longer within root
+    // blocks potential abuse of relative paths like ?path/../../../../dir
+    if($realpath !== $rootpath && !self::is_within_path($realpath, Config::$root)) {
+      if(strpos(($is_dir ? $relpath : dirname($relpath)), ':') !== false) return; // dir may not contain ':'
+      if(strpos($relpath, '..') !== false) return; // path may not contain '..'
+      //if(self::is_exclude($realpath, $is_dir, true)) return; // check is_exclude also on realpath / seems pointless ...
+    }
+
+    // is invalid
+    if(!is_readable($realpath)) return;        // not readable
+    if($is_dir && !is_dir($realpath)) return;  // invalid dir
+    if(!$is_dir && !is_file($realpath)) return;// invalid file
+    if(self::is_exclude($rootpath, $is_dir)) return; // rootpath is excluded
+
+    // return full path
+    return $rootpath;
+  }
+
+  // determine if path should be excluded from displaying in the gallery
+  public static function is_exclude($path = false, $is_dir = true, $symlinked = false){
+
+    // is not excluded if empty or path is root
+    if(!$path || $path === Config::$root) return;
+
+    // exclude relative paths that start with _files* (reserved for hidden items)
+    if(strpos('/' . self::relpath($path), '/_files') !== false) return true;
+
+    // exclude Files Gallery PHP application name (normally "index.php" but could be renamed)
+    if($path === Config::$__file__) return true;
+
+    // exclude symlinks if symlinks not allowed (symlinks might be sensitive)
+    if($symlinked && !Config::get('allow_symlinks')) return true;
+
+    // exclude Files Gallery storage_path (normally _files dir relative to PHP file)
+    if(Config::$storagepath && self::is_within_path($path, Config::$storagepath)) return true;
+
+    // exclude if dir or file's parent dir is excluded by config dirs_exclude
+    if(Config::get('dirs_exclude')) {
+
+      // dir to check is path or parent dir if file
+      $dirname = $is_dir ? $path : dirname($path);
+
+      // check if dir matches dirs_exclude, unless dir is root (root dir can't be excluded)
+      if($dirname !== Config::$root && preg_match(Config::get('dirs_exclude'), self::relpath($dirname))) return true;
+    }
+
+    // exclude file
+    if(!$is_dir){
+
+      // get file name
+      $filename = U::basename($path);
+
+      // make sure file is not local config file
+      if($filename === Config::$localconfigpath) return true;
+
+      // exclude file name (not path) by files_exclude
+      if(Config::get('files_exclude') && preg_match(Config::get('files_exclude'), $filename)) return true;
+    }
+  }
+}
+
+// class Json / JSON response functions
+class Json {
+
+  // output json from array and exit
+  public static function exit($arr = []){
+    header('content-type: application/json');
+    exit(json_encode($arr));
+  }
+
+  // json error with message
+  public static function error($error = 'Error'){
+    self::exit(['error' => $error]);
+  }
+
+  // output json from array and cache as .json / used by class dirs and class dir
+  public static function cache($arr = [], $message = false, $cache = true){
+    $json = empty($arr) ? '{}' : @json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
+    if(empty($json)) self::error(json_last_error() ? json_last_error_msg() : 'json_encode() error');
+  	if($cache) @file_put_contents($cache, $json);
+    U::message(['cache ' . ($cache ? 'ON' : 'OFF') ]);
+    U::header($message, false, 'application/json;');
+  	echo $json;
+  }
+}
+
+// class X3 / functions if running Files Gallery alongside X3 www.photo.gallery
+class X3 {
+
+  // vars
+  private static $path; // cache absolute X3 path
+  private static $inc = '/app/x3.inc.php'; // relative path to the X3 include file that is used for checking and invalidating cache
+
+  // checks if Files Gallery root points into X3 content and returns path to X3 root
+  public static function path(){
+    if(isset(self::$path)) return self::$path; // cache path
+    $arr = explode('/content', Config::$root);
+    return count($arr) > 1 && file_exists($arr[0] . self::$inc) ? $arr[0] : false;
+  }
+
+  // attempt to load x3-login if 1. root is X3 path, 2. there is no existing login, 3. files.x3-login.php exists
+  public static function login(){
+    return self::path() && U::include('plugins/files.x3-login.php');
+  }
+
+  // get public url path of X3, used to render X3 thumbnails instead of thumbs created by Files Gallery
+  public static function urlpath(){
+    return self::path() ? Path::urlpath(self::path()) : false;
+  }
+
+  // on Filemanager actions, invalidate X3 cache updating modified time of x3.inc.php
+  public static function invalidate(){
+    if(self::path()) @touch(self::path() . self::$inc);
+  }
+}
+
+// class Tests / outputs PHP, server and config diagnostics by url ?action=tests
+class Tests {
+
+  // html response
+  private $html = '';
+
+  // construct new Tests()
+  function __construct() {
 
     // display all errors to catch anything unusual
     ini_set('display_errors', 1);
     ini_set('display_startup_errors', 1);
     error_reporting(E_ALL);
 
-    // BASIC DIAGNOSTICS
-    echo '<!doctype html><html><head><title>Files Gallery check system and config.</title><meta name="robots" content="noindex,nofollow"><style>body{font-family:system-ui;color:#444;line-height:1.6;margin:0 auto;max-width:700px}.container{background-color:#F3F3F3;padding:.5vw 2vw 2vw;border-radius:3px;margin:1vw;overflow:scroll}.test:before{display:inline-block;width:18px;text-align:center;margin-right:5px}.neutral:before{color:#BBB}.success:before{color:#78a642}.success:before,.neutral:before{content:"\2713"}.fail:before{content:"\2716";color:firebrick}</style></head><body><div class="container"><h2>Files Gallery ' . config::$version . '</h2><div style="margin:-1rem 0 .5rem">' . (isset($_SERVER['SERVER_NAME']) ? $_SERVER['SERVER_NAME'] . '<br>' : '') . 'PHP ' . phpversion() . '<br>' . (isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : '') . '<p><i>* The following tests are only to help diagnose feature-specific issues.</i></p></div>';
-    // prop output helper
-    function prop($name, $success = 'neutral', $val = false){
-      return '<div class="test ' . (is_bool($success) ? ($success ? 'success' : 'fail') : $success) . '">'. $name . ($val ? ': <b>' . $val . '</b>' : '') . '</div>';
-    }
-    // filesystem exists/writeable
-    function exists_writeable($path, $name){ // display additional permissions+owner info only if $path is !writeable
-      echo file_exists($path) ? prop($name . ' is_writeable ' . (!is_writable($path) ? ' ' . substr(sprintf('%o', fileperms($path)), -4) . ' [owner ' . fileowner($path) . ']' : ''), is_writable($path)) : prop($name . ' "' . $path . '" does not exist', false);
-    }
-    exists_writeable(config::$config['root']?:'.', 'root');
-    exists_writeable(config::$config['storage_path'], 'storage_path');
-    if((file_exists(config::$config['root']) && !is_writable(config::$config['root'])) || (file_exists(config::$config['storage_path']) && !is_writable(config::$config['storage_path']))) exists_writeable(__FILE__, _basename(__FILE__));
-    // extension_loaded
-    if(function_exists('extension_loaded')) foreach (['gd', 'exif', 'mbstring'] as $name) echo prop($name, extension_loaded($name));
-    // zip
-    echo prop('ZipArchive', class_exists('ZipArchive'));
-    // function_exsists
-    foreach (['mime_content_type', 'finfo_file', 'iptcparse', 'exif_imagetype', 'session_start', 'ini_get', 'exec'] as $name) echo prop($name . '()', function_exists($name));
-    // check ffmpeg if exec (else don't check, because could be enabled even if exec() is not)
-    if(function_exists('exec')) echo prop('ffmpeg', !!get_ffmpeg_path());
-    // ini_get
-    if(function_exists('ini_get')) foreach (['memory_limit', 'file_uploads', 'upload_max_filesize', 'post_max_size', 'max_file_uploads'] as $name) echo prop($name, 'neutral', @ini_get($name));
+    // first let's check if new Config() created dirs and files in storagepath
+    $this->created();
 
-    // CONFIG OUTPUT
-    echo '</div><div class="container"><h3>Config</h3>';
-    // invalid and duplicate arrays
-    $user_invalid = array_diff_key($user_config, self::$default);
-    $user_duplicate = array_intersect_assoc($user_valid, self::$default);
+    // title, version, server name, PHP version and server software
+    $this->html .= '<h2>Files Gallery ' . Config::$version . '</h2>';
+    if(isset($_SERVER['SERVER_NAME'])) $this->prop('<b>'.$_SERVER['SERVER_NAME'].'</b>');
+    $this->prop('<b>PHP ' . phpversion().'</b>');
+    if(isset($_SERVER['SERVER_SOFTWARE'])) $this->prop('<b>'.$_SERVER['SERVER_SOFTWARE'].'</b>');
 
-    // items
-    $items = array(
-      ['arr' => $local_config, 'comment' => "// LOCAL CONFIG\n// " . self::$local_config_file],
-      ['arr' => $storage_config, 'comment' => "// STORAGE CONFIG\n// " . rtrim($storage_path ?: '', '\/') . '/config/config.php'],
-      ['arr' => $user_invalid, 'comment' => "// INVALID PARAMS\n// The following custom parameters will be ignored as they are not valid:", 'var' => '$invalid', 'hide' => empty($user_invalid)],
-      ['arr' => $user_duplicate, 'comment' => "// DUPLICATE DEFAULT PARAMS\n// The following custom parameters will have no effect as they are identical to defaults:", 'var' => '$duplicate', 'hide' => empty($user_duplicate)],
-      ['arr' => $user_valid, 'comment' => "// USER CONFIG\n// User config parameters.", 'var' => '$user', 'hide' => (empty($local_config) || empty($storage_config)) && empty($user_invalid)],
-      ['arr' => self::$config, 'comment' => "// CONFIG\n// User parameters merged with default parameters.", 'var' => '$config'],
-      ['arr' => self::$default, 'comment' => "// DEFAULT CONFIG\n// Default config parameters.", 'var' => '$default'],
-      //['arr' => array_diff_key(get_class_vars('config'), array_flip(['default', 'config'])), 'comment' => "// STATIC VARS\n// Static app vars.", 'var' => '$static']
-    );
+    // check if paths root, storage_path and index.php exist and are writeable
+    $this->check_path(Config::$root, 'root');
+    $this->check_path(Config::$storagepath, 'storage_path');
+    $this->check_path(__FILE__, U::basename(__FILE__));
 
-    // loop
-    $output = '<?php' . PHP_EOL;
-    foreach ($items as $arr => $props) {
-      $is_empty = empty($props['arr']);
-      if(isset($props['hide']) && $props['hide']) continue;
-      foreach (['username', 'password', 'license_key', 'allow_tasks', '__dir__', '__file__'] as $prop) if(isset($props['arr'][$prop]) && !empty($props['arr'][$prop]) && is_string($props['arr'][$prop])) $props['arr'][$prop] = '***';
-      $export = $is_empty ? 'array ()' : var_export($props['arr'], true);
-      $comment = preg_replace('/\n/', " [" . count($props['arr']) . "]\n", $props['comment'], 1);
-      $var = isset($props['var']) ? $props['var'] . ' = ' : 'return ';
-      $output .= PHP_EOL . $comment . PHP_EOL . $var . $export . ';' . PHP_EOL;
-    }
-    highlight_string($output . PHP_EOL . ';?>');
-    echo '</div></body></html>';
+    // check a few PHP extensions gd, exif and mbstring
+    if(function_exists('extension_loaded')) foreach (['gd', 'exif', 'mbstring'] as $name) $this->prop($name, extension_loaded($name));
+
+    // check if ZipArchive class exists
+    $this->prop('ZipArchive', class_exists('ZipArchive'));
+
+    // check various PHP functions
+    foreach (['mime_content_type', 'finfo_file', 'iptcparse', 'exif_imagetype', 'session_start', 'ini_get', 'exec'] as $name) $this->prop($name . '()', function_exists($name));
+
+    // check ffmpeg if exec is available, else don't check, because ffmpeg could be enabled even if !exec()
+    if(function_exists('exec')) $this->prop('ffmpeg', !!U::ffmpeg_path());
+
+    // get various PHP ini values with ini_get()
+    if(function_exists('ini_get')) foreach (['memory_limit', 'file_uploads', 'upload_max_filesize', 'post_max_size', 'max_file_uploads'] as $name) $this->prop($name, 'neutral', @ini_get($name));
+
+    // validate regex for files_exclude and dirs_exclude config options
+    foreach (['files_exclude', 'dirs_exclude'] as $key) if(Config::get($key) && @preg_match(Config::get($key), '') === false) $this->prop("Invalid <strong>$key</strong> regex", false);
+
+    // output merged config in readable format, with sensitive properties masked out
+    $this->showconfig();
+
+    // output basic formatted tests in html format
+    $this->output();
+
+    // exit on tests output
     exit;
   }
 
-  // check if root points to a dir inside X3 content / invalidate X3 cache on filemanager action / X3 license
-  private function x3_check() {
-    if(empty(self::$config['root']) || !is_string(self::$config['root'])) return;
-    $path_arr = explode('/content', self::$config['root']);
-    if(count($path_arr) < 2 || !@file_exists($path_arr[0] . '/app/x3.inc.php')) return;
-    self::$x3_path = real_path($path_arr[0]);
-    if(!self::$has_login) get_include('plugins/files.x3-login.php'); // optional x3 login plugin
+  // checks if new Config() created dirs and files in storagepath
+  // useful to run ?action=tests if you want to create config.php file before executing Files Gallery
+  private function created(){
+    if(empty(Config::$created)) return;
+    $this->html .= '<p>Successfully created the following storage items:</p>';
+    foreach (Config::$created as $key) $this->prop($key, true);
   }
 
-  // save config
-  public static function save_config($config = array()){
-    $save_config = array_intersect_key(array_replace(self::$storage_config, $config), self::$default);
-    $export = preg_replace("/  '/", "  //'", var_export(array_replace(self::$default, $save_config), true));
-    foreach ($save_config as $key => $value) if($value !== self::$default[$key]) $export = str_replace("//'" . $key, "'" . $key, $export);
-    return @file_put_contents(config::$storage_config_realpath, '<?php ' . PHP_EOL . PHP_EOL . '// CONFIG / https://www.files.gallery/docs/config/' . PHP_EOL . '// Uncomment the parameters you want to edit.' . PHP_EOL . 'return ' . $export . ';');
+  // checks if a path exists and is writeable
+  private function check_path($path, $name){
+    if(!$path) return $this->prop($name, false);
+    if(!file_exists($path)) return $this->prop("$name does not exist", false);
+    if(!is_writable($path)) return $this->prop($name . ' is not writeable ' . substr(sprintf('%o', fileperms($path)), -4) . ' [owner ' . fileowner($path) . ']', false);
+    $this->prop($name, true);
   }
 
-  // construct
-  function __construct($is_doc = false) {
-
-    // normalize OS paths
-    self::$__dir__ = real_path(__DIR__);
-    self::$__file__ = real_path(__FILE__);
-
-    // local config
-    $local_config = self::get_config(self::$local_config_file);
-
-    // storage config
-    $storage_path = isset($local_config['storage_path']) ? $local_config['storage_path'] : self::$default['storage_path'];
-    $storage_realpath = !empty($storage_path) ? real_path($storage_path) : false;
-    if($is_doc && $storage_realpath === self::$__dir__) error('<strong>storage_path must be a unique dir.</strong>');
-    self::$storage_config_realpath = $storage_realpath ? $storage_realpath . '/config/config.php' : false;
-    self::$storage_config = self::get_config(self::$storage_config_realpath);
-
-    // config
-    $user_config = array_replace(self::$storage_config, $local_config);
-    $user_valid = array_intersect_key($user_config, self::$default);
-    self::$config = array_replace(self::$default, $user_valid);
-
-    // root
-    self::$root = real_path(self::$config['root']);
-
-    // root does not exist
-    if($is_doc && !self::$root) error('root dir "' . self::$config['root'] . '" does not exist.');
-
-    // doc root
-    self::$doc_root = real_path($_SERVER['DOCUMENT_ROOT']);
-
-    // login credentials
-    self::$username = self::$config['username'];
-    self::$password = self::$config['password'];
-
-    // has_login
-    self::$has_login = self::$username || self::$password ? true : false;
-
-    // $image_cache
-    $image_cache = self::$config['image_resize_enabled'] && self::$config['image_resize_cache'] && self::$config['load_images'] ? true : false;
-
-    // cache enabled
-    if($image_cache || self::$config['cache']){
-
-      // create storage_path
-      if(empty($storage_realpath)){
-        $storage_path = is_string($storage_path) ? rtrim($storage_path, '\/') : false;
-        if(empty($storage_path)) error('Invalid storage_path parameter.');
-        mkdir_or_error($storage_path);
-        $storage_realpath = real_path($storage_path);
-        if(empty($storage_realpath)) error("storage_path <strong>$storage_path</strong> does not exist and can't be created.");
-        self::$storage_config_realpath = $storage_realpath . '/config/config.php'; // update since it wasn't assigned
-      }
-      self::$storage_path = $storage_realpath;
-
-      // storage path is within doc root
-      if(is_within_docroot(self::$storage_path)) self::$storage_is_within_doc_root = true;
-
-      // cache_path real path
-      self::$cache_path = self::$storage_path . '/cache';
-
-      // create storage dirs
-      if($is_doc){
-        $create_dirs = [$storage_realpath . '/config'];
-        if($image_cache) $create_dirs[] = self::$cache_path . '/images';
-        if(self::$config['cache']) array_push($create_dirs, self::$cache_path . '/folders', self::$cache_path . '/menu');
-        foreach($create_dirs as $create_dir) mkdir_or_error($create_dir);
-      }
-
-      // create/update config file, with default parameters commented out.
-      if($is_doc && self::$storage_config_realpath && (!file_exists(self::$storage_config_realpath) || filemtime(self::$storage_config_realpath) < filemtime(__FILE__))) self::save_config();
-
-      // image resize cache direct
-      if(self::$config['image_resize_cache_direct'] && !self::$has_login && self::$config['load_images'] && self::$config['image_resize_cache'] && self::$config['image_resize_enabled'] && self::$storage_is_within_doc_root) self::$image_resize_cache_direct = true;
-    }
-
-    // check if root points to a dir inside X3 content / allows invalidate X3 cache on filemanager actions, X3 resized images and X3 license
-    self::x3_check();
-
-    // image_resize_dimensions_retina
-    if(self::$config['image_resize_dimensions_retina'] && self::$config['image_resize_dimensions_retina'] > self::$config['image_resize_dimensions']) self::$image_resize_dimensions_retina = self::$config['image_resize_dimensions_retina'];
-
-    // dirs hash
-    self::$dirs_hash = substr(md5(self::$doc_root . self::$__dir__ . self::$root . self::$version .  self::$config['cache_key'] . self::$image_resize_cache_direct . self::$config['files_exclude'] . self::$config['dirs_exclude']), 0, 6);
-
-    // Assign assets url for plugins/JS/CSS/languages, defaults to CDN
-    if($is_doc) self::$assets = empty(self::$config['assets']) ? 'https://cdn.jsdelivr.net/npm/' : rtrim(self::$config['assets'], '/') . '/';
-
-    // login
-    if(self::$has_login) check_login($is_doc);
-
-    // files check with ?check=1 / can be commented out if not required
-    if(get('check')) self::files_check($local_config, $storage_path, self::$storage_config, $user_config, $user_valid);
-    // if(get('phpinfo')) { phpinfo(); exit; } // check system phpinfo with ?phpinfo=true / disabled for security
+  // outputs and formats a property feature <div> element to html
+  private function prop($name, $success = 'neutral', $value = ''){
+    $class = is_string($success) ? $success : ($success ? ' success' : 'fail');
+    $this->html .= "<div class=\"test $class\">$name <b>$value</b></div>";
   }
-};
 
-// get common header html for main document and login page
-function get_header($title, $class){
-?>
-<!doctype html><!-- www.files.gallery -->
-<html class="<?php echo $class; ?>" data-theme="contrast">
-<script>
-let theme = (() => {
-  try {
-    return localStorage.getItem('files:theme');
-  } catch (e) {
-    return false;
-  };
-})() || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'contrast');
-if(theme !== 'contrast') document.documentElement.dataset.theme = theme;
-</script>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex, nofollow">
-    <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAD1BMVEUui1f///9jqYHr9O+fyrIM/O8AAAABIklEQVR42u3awRGCQBBE0ZY1ABUCADQAoEwAzT8nz1CyLLszB6p+B8CrZuDWujtHAAAAAAAAAAAAAAAAAACOQPPp/2Y0AiZtJNgAjTYzmgDtNhAsgEkyrqDkApkVlsBDsq6wBIY4EIqBVuYVFkC98/ycCkr8CbIr6MCNsyosgJvsKxwFQhEw7APqY3mN5cBOnt6AZm/g6g2o8wYqb2B1BQcgeANXb0DuwOwNdKcHLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeA20mArmB6Ugg0NsCcP/9JS8GAKSlVZMBk8p1GRgM2R4jMHu51a/2G1ju7wfoNrYHyCtUY3zpOthc4MgdNy3N/0PruC/JlVAwAAAAAAAAAAAAAAABwZuAHuVX4tWbMpKYAAAAASUVORK5CYII=">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <title><?php echo $title; ?></title>
-    <?php get_include('include/head.html'); ?>
-    <link href="<?php echo config::$assets ?>files.photo.gallery@<?php echo config::$version ?>/css/files.css" rel="stylesheet">
-    <?php get_include('css/custom.css'); ?>
-  </head>
-<?php
-}
+  // output merged config in readable format, with sensitive properties masked out
+  private function showconfig(){
 
-// login page / block basic bots by injecting form via javascript
-function login_page($is_login_attempt, $sidx, $is_logout, $client_hash){
-  get_header('Login', 'page-login'); ?>
-  <body class="page-login-body"><article class="login-container"></article></body>
-  <script>
-    document.querySelector('.login-container').innerHTML = '\
-    <h1>Login</h1>\
-    <?php if($is_login_attempt && $_POST['sidx'] !== $sidx) { ?><div class="alert alert-danger" role="alert"><strong>PHP session ID mismatch</strong><br>If the error persists, your PHP is incorrectly creating new session ID for each request.</div><?php } else if($is_login_attempt) { ?>\
-    <div class="alert alert-danger" role="alert">Incorrect login!</div><?php } else if($is_logout) { ?>\
-    <div class="alert alert-warning" role="alert">You are now logged out.</div><?php } ?>\
-    <form class="login-form">\
-      <input type="text" class="input" name="fusername" placeholder="Username" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">\
-      <input type="password" class="input" name="fpassword" placeholder="Password" required spellcheck="false" autocomplete="off">\
-      <input type="hidden" name="client_hash" value="<?php echo $client_hash; ?>">\
-      <input type="hidden" name="sidx" value="<?php echo $sidx; ?>">\
-      <button type="submit" class="button">Login</button>\
-    </form>';
-    document.querySelector('.login-form').addEventListener('submit', (e) => {
-      document.body.classList.add('form-loading');
-      e.currentTarget.action = '<?php echo isset($_GET['logout']) ? strtok($_SERVER['REQUEST_URI'], '?') : $_SERVER['REQUEST_URI']; ?>';
-      e.currentTarget.method = 'post';
-    }, false);
-  </script>
-</html>
-<?php exit; // end form and exit
-}
+    // copy config array
+    $arr = Config::$config;
 
-// check login
-function check_login($is_doc){
-  if($is_doc && empty(config::$username)) error('Username cannot be empty.');
-  if($is_doc && empty(config::$password)) error('Password cannot be empty.');
-  if(session_status() === PHP_SESSION_NONE && !session_start() && $is_doc) error('Failed to initiate PHP session_start();', 500);
+    // mask sensitive values
+    foreach (['root', 'storage_path', 'start_path', 'username', 'password', 'license_key', 'allow_tasks'] as $prop) if($arr[$prop]) $arr[$prop] = '***';
 
-  // [security] client hash and login hash
-  foreach(['HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR'] as $key){
-    $ip = isset($_SERVER[$key]) && !empty($_SERVER[$key]) ? explode(',', $_SERVER[$key])[0] : '';
-    if($ip && filter_var($ip, FILTER_VALIDATE_IP)) break;
+    // create PHP array string that resembles config.php files
+    $php = '<?php' . PHP_EOL . PHP_EOL . 'return ' . var_export($arr, true) . ';';
+
+    // add to html response and highlight
+    $this->html .= '<h2>Config</h2>' . highlight_string($php, true);
   }
-  $client_hash = md5($ip . (isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '') . __FILE__ . (isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : ''));
-  $login_hash = md5(config::$username . config::$password . $client_hash);
 
-  // login status
-  $is_logout = isset($_GET['logout']) && isset($_SESSION['login']);
-  if($is_logout) unset($_SESSION['login']);
-  $is_logged_in = !$is_logout && isset($_SESSION['login']) && $_SESSION['login'] === $login_hash;
-
-  // not logged in
-  if(!$is_logged_in){
-
-    // login only on html pages
-    if($is_doc){
-
-      // vars
-      $sidx = md5(session_id());
-      $is_login_attempt = isset($_POST['fusername']) && isset($_POST['fpassword']) && isset($_POST['client_hash']) && isset($_POST['sidx']);
-      $fpassword = $is_login_attempt ? trim($_POST['fpassword']) : false;
-
-      // compare login case-insensitive / use mb_strtolower() if available
-      function mbstrtolower($str){
-        return function_exists('mb_strtolower') ? mb_strtolower($str) : strtolower($str);
-      }
-
-      // correct login set $_SESSION['login']
-      if($is_login_attempt &&
-        mbstrtolower(trim($_POST['fusername'])) == mbstrtolower(config::$username) &&
-        (phpversion() >= 5.5 && !password_needs_rehash(config::$password, PASSWORD_DEFAULT) ? password_verify($fpassword, config::$password) : ($fpassword == config::$password || md5($fpassword) == config::$password)) &&
-        $_POST['client_hash'] === $client_hash &&
-        $_POST['sidx'] === $sidx
-      ){
-        $_SESSION['login'] = $login_hash;
-
-      // display login page and exit
-      } else {
-        login_page($is_login_attempt, $sidx, $is_logout, $client_hash);
-      }
-
-    // not logged in (images or post API requests), don't show form.
-    } else if(post('action')){
-      json_error('login');
-
-    } else {
-      error('You are not logged in.', 401);
-    }
+  // output basic formatted tests in html format
+  private function output(){
+    echo '<!doctype html><html><head><title>Files Gallery check system and config.</title><meta name="robots" content="noindex,nofollow"><style>body{font-family:system-ui;color:#444;line-height:1.6;margin:2vw 3vw;overflow:scroll}b{font-weight:600}.test:before{display:inline-block;width:18px;text-align:center;margin-right:5px}.neutral:before{color:#BBB}.success:before{color:#78a642}.success:before,.neutral:before{content:"\2713"}.fail:before{content:"\2A09";color:firebrick}</style></head><body>' . $this->html . '</body></html>';
   }
 }
 
-//
-function mkdir_or_error($path){
-  if(!file_exists($path) && !mkdir($path, 0777, true)) error('Failed to create ' . $path, 500);
-}
-function _basename($path){
-  return basename($path); // because setlocale(LC_ALL,'en_US.UTF-8')
-  // OPTIONAL: replace basename() which may fail on UTF-8 chars if locale != UTF8
-  // $arr = explode('/', str_replace('\\', '/', $path));
-  // return end($arr);
-}
-function real_path($path){
-  $real_path = realpath($path);
-  return $real_path ? str_replace('\\', '/', $real_path) : false;
-}
-function root_relative($dir){
-  return ltrim(substr($dir, strlen(config::$root)), '\/');
-}
-function root_absolute($dir){
-  return config::$root . ($dir || $dir === '0' ? '/' . $dir : '');
-}
-function is_within_path($path, $root){
-  return strpos($path . '/', $root . '/') === 0;
-}
-function is_within_root($path){
-  return is_within_path($path, config::$root);
-}
-function is_within_docroot($path){
-  return is_within_path($path, config::$doc_root);
-}
-function get_folders_cache_path($name){
-  return config::$cache_path . '/folders/' . $name . '.json';
-}
-function get_json_cache_url($name){
-  $file = get_folders_cache_path($name);
-  return file_exists($file) ? get_url_path($file) : false;
-}
-function get_dir_cache_path($dir, $mtime = false){
-  if(!config::$config['cache'] || !$dir) return;
-  return get_folders_cache_path(get_dir_cache_hash($dir, $mtime));
-}
-function get_dir_cache_hash($dir, $mtime = false){
-  return config::$dirs_hash . '.' . substr(md5($dir), 0, 6) . '.' . ($mtime ?: filemtime($dir));
-}
-function header_memory_time(){
-  return (isset($_SERVER['REQUEST_TIME_FLOAT']) ? round(microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'], 3) . 's, ' : '') . round(memory_get_peak_usage() / 1048576, 1) . 'M';
-}
+// class FileResponse / outputs file, video preview image, resized image or proxies any file by PHP
+class FileResponse {
 
-// read file
-// todo: add files-date header
-function read_file($path, $mime = false, $msg = false, $props = false, $cache_headers = false, $clone = false){
-  if(!$path || !file_exists($path)) return false;
-  $cloned = $clone && @copy($path, $clone) ? true : false;
-  //if($mime == 'image/svg') $mime .= '+xml';
-  header('content-type: ' . ($mime ?: 'image/jpeg'));
-	header('content-length: ' . filesize($path));
-  header('content-disposition: filename="' . _basename($path) . '"');
-  if($msg) header('files-msg: ' . $msg . ($cloned ? ' [cloned to ' . _basename($clone) . ']' : '') . ' [' . ($props ? $props . ', ' : '') . header_memory_time() . ']');
-  if($cache_headers) set_cache_headers();
-  if(!is_readable($path) || readfile($path) === false) error('Failed to read file ' . $path . '.', 400);
-  exit;
-}
+  // vars
+  private $path;
+  private $mime;
+  private $resize;
+  private $clone;
 
-// get mime
-function get_mime($path){
-  if(function_exists('mime_content_type')){
-    return mime_content_type($path);
-  } else {
-    return function_exists('finfo_file') ? finfo_file(finfo_open(FILEINFO_MIME_TYPE), $path) : false;
-  }
-}
+  // construct resize image, all processes in due order
+  public function __construct($path, $resize = false, $clone = false){
 
-// set cache headers
-function set_cache_headers(){
-  $seconds = 31536000; // 1 year;
-  header('expires: ' . gmdate('D, d M Y H:i:s', time() + $seconds) . ' GMT');
-  header("cache-control: public, max-age=$seconds, s-maxage=$seconds, immutable");
-  header('pragma: cache');
-  // header("Last-Modified:" . gmdate('D, d M Y H:i:s', time() - $seconds) . ' GMT');
-  // etag?
-}
+    // exif if invalid $path
+    if(!$path) U::error('Invalid file request', 404);
 
-// get image cache path
-function get_image_cache_path($path, $image_resize_dimensions, $filesize, $filemtime){
-  return config::$cache_path . '/images/' . substr(md5($path), 0, 6) . '.' . $filesize . '.' . $filemtime . '.' . $image_resize_dimensions . '.jpg';
-}
+    // store path and resolve potential symlinks
+    $this->path = Path::realpath($path);
 
-// is exclude
-function is_exclude($path = false, $is_dir = true, $symlinked = false){
+    // get mime to check if requested video or image files are valid
+    $this->mime = U::mime($this->path);
 
-  // early exit
-  if(!$path || $path === config::$root) return;
+    // resize numeric value assigned if image resize, but could be set to 'video'
+    $this->resize = is_numeric($resize) ? intval($resize) : $resize;
 
-  // exclude all root-relative paths that start with /_files* (reserved for any files and folders to be ignored and hidden from Files app)
-  if(strpos('/' . root_relative($path), '/_files') !== false) return true;
+    // clone the file (used by folder preview action)
+    $this->clone = $clone;
 
-  // exclude files PHP application
-  if($path === config::$__file__) return true;
+    // get FFmpeg video preview image
+    if($this->resize === 'video') return $this->get_video_preview();
 
-  // symlinks not allowed
-  if($symlinked && !config::$config['allow_symlinks']) return true;
+    // get resized image preview (convert resize parameter to number, else it will return 0, not allowed)
+    if($this->resize) return $this->get_image_preview();
 
-  // exclude storage path
-  if(config::$storage_path && is_within_path($path, config::$storage_path)) return true;
-
-  // dirs_exclude: check root relative dir path
-  if(config::$config['dirs_exclude']) {
-    $dirname = $is_dir ? $path : dirname($path);
-    if($dirname !== config::$root && preg_match(config::$config['dirs_exclude'], substr($dirname, strlen(config::$root)))) return true;
+    // get file proxied through PHP if it's not within document root
+    $this->get_file_proxied();
   }
 
-  // files_exclude: check vs basename
-  if(!$is_dir){
-    $basename = _basename($path);
-    if($basename === config::$local_config_file) return true;
-    if(config::$config['files_exclude'] && preg_match(config::$config['files_exclude'], $basename)) return true;
-  }
-}
+  // get FFmpeg video preview image
+  private function get_video_preview(){
 
-// valid root path
-function valid_root_path($path, $is_dir = false){
-
-  // invalid
-  if($path === false) return;
-  if(!$is_dir && empty($path)) return; // path cannot be empty if file
-  if($path && substr($path, -1) == '/') return; // path should never be root absolute or end with /
-
-  // absolute path may differ if path contains symlink
-  $root_absolute = root_absolute($path);
-  $real_path = real_path($root_absolute);
-
-  // file does not exist
-  if(!$real_path) return;
-
-  // security checks if path contains symlink
-  if($root_absolute !== $real_path) {
-    if(strpos(($is_dir ? $path : dirname($path)), ':') !== false) return; // dir may not contain ':'
-    if(strpos($path, '..') !== false) return; // path may not contain '..'
-    if(is_exclude($root_absolute, $is_dir, true)) return;
-  }
-
-  // nope
-  if(!is_readable($real_path)) return; // not readable
-  if($is_dir && !is_dir($real_path)) return; // dir check
-  if(!$is_dir && !is_file($real_path)) return; // file check
-  if(is_exclude($real_path, $is_dir)) return; // exclude path
-
-  // return root_absolute
-  return $root_absolute;
-}
-
-// image create from
-function image_create_from($path, $type){
-  if(!$path || !$type) return;
-  if($type === IMAGETYPE_JPEG){
-    return imagecreatefromjpeg($path);
-  } else if ($type === IMAGETYPE_PNG) {
-    return imagecreatefrompng($path);
-  } else if ($type === IMAGETYPE_GIF) {
-    return imagecreatefromgif($path);
-  } else if ($type === 18/*IMAGETYPE_WEBP*/) {
-    if(version_compare(PHP_VERSION, '5.4.0') >= 0) return imagecreatefromwebp($path);
-  } else if ($type === IMAGETYPE_BMP) {
-    if(version_compare(PHP_VERSION, '7.2.0') >= 0) return imagecreatefrombmp($path);
-  } else if ($type === 19/*IMAGETYPE_AVIF*/) {
-    if(version_compare(PHP_VERSION, '8.2.0') >= 0) return imagecreatefromavif($path);
-  }
-}
-
-// get supported image resize types
-function resize_image_types(){
-  $types = ['jpeg', 'jpg', 'png', 'gif']; // always compatible
-  if(version_compare(PHP_VERSION, '5.4.0') >= 0) {
-    $types[] = 'webp';
-    if(version_compare(PHP_VERSION, '7.2.0') >= 0) {
-      $types[] = 'bmp';
-      if(version_compare(PHP_VERSION, '8.2.0') >= 0) $types[] = 'avif';
-    }
-  }
-  return $types;
-}
-
-// get ffmpeg path / check required config items / check exec() / create "quoted" / check exec('ffmpeg -version')
-function get_ffmpeg_path(){
-  if(!empty(array_filter(['video_thumbs', 'load_images', 'image_resize_cache', 'video_ffmpeg_path'], function($key){
-    return empty(config::$config[$key]);
-  })) || !function_exists('exec')) return false;
-  //$path = '"' . str_replace('"', '\"', config::$config['video_ffmpeg_path']) . '"'; // <- if path contains Chinese chars
-  $path = escapeshellarg(config::$config['video_ffmpeg_path']);
-  return @exec($path . ' -version') ? $path : false;
-}
-
-// get file view preview, resized image or proxy
-function get_file($path, $resize = false, $clone = false){
-
-  // validate
-  if(!$path) error('Invalid file request.', 404);
-  $path = real_path($path); // in case of symlink path
-  $mime = get_mime($path); // may return false if server does not support mime_content_type() or finfo_file()
-
-  // video thumbnail (FFmpeg)
-  if($resize == 'video') {
+    // image_resize_cache required
+    if(!Config::get('image_resize_cache')) U::error('image_resize_cache must be enabled to create and store video thumbs', 400);
 
     // requirements with diagnostics / only check $mime if $mime detected
-    if($mime && strtok($mime, '/') !== 'video') error('<strong>' . _basename($path) . '</strong> (' . $mime . ') is not a video.', 415);
+    if($this->mime && strtok($this->mime, '/') !== 'video') U::error('Unsupported video type ' . $this->mime, 415);
 
-    // get cache path
-    $cache = get_image_cache_path($path, 480, filesize($path), filemtime($path));
+    // get cache path, where we will look for image or create it
+    $cache = Path::imagecachepath($this->path, 480, filesize($this->path), filemtime($this->path));
 
-    // check for cached video thumbnail / $path, $mime, $msg, $props, $cache_headers
-    if($cache) read_file($cache, null, 'Video thumb served from cache', null, true, $clone);
+    // check for cached video thumbnail / clone if called from folder preview
+    if($cache) U::readfile($cache, 'image/jpeg', 'Video preview from cache', true, $this->clone);
 
-    // get FFmpeg path `video_ffmpeg_path` / checks `exec('ffmpeg -version')`
-    $ffmpeg_path = get_ffmpeg_path();
-    if(!$ffmpeg_path) error('<a href="http://ffmpeg.org/" target="_blank">FFmpeg</a> disabled. Check your <a href="' . _basename(__FILE__) . '?check=1" target="_blank">diagnostics</a>.', 400);
+    // get FFmpeg path `video_ffmpeg_path` or error
+    $ffmpeg_path = U::ffmpeg_path() ?: U::error('<a href="http://ffmpeg.org/" target="_blank">FFmpeg</a> disabled. Check your <a href="' . U::basename(__FILE__) . '?check=1" target="_blank">diagnostics</a>.', 400);
 
-    // ffmpeg command
-    $cmd = $ffmpeg_path . ' -ss 3 -t 1 -hide_banner -i "' . str_replace('"', '\"', $path) . '" -frames:v 1 -an -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg "' . $cache . '" 2>&1';
+    // ffmpeg command to create video preview in $cache path
+    $cmd = $ffmpeg_path . ' -ss 3 -t 1 -hide_banner -i "' . str_replace('"', '\"', $this->path) . '" -frames:v 1 -an -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg "' . $cache . '" 2>&1';
 
-    // try to execute command
+    // attempt to execute FFmpeg command
     exec($cmd, $output, $result_code);
 
     // fail if result_code is anything else than 0
-    if($result_code) error("Error generating thumbnail for video (\$result_code $result_code)", 400);
+    if($result_code) U::error("Error generating thumbnail for video (\$result_code $result_code)", 500);
+
+    // if for some reason, the created $cache file does not exist
+    if(!file_exists($cache)) U::error('Cache file ' . U::basename($cache) . ' does not exist', 404);
 
     // fix for empty video previews that get created for extremely short videos (or other unknown errors)
-    if(file_exists($cache) && !filesize($cache) && imagejpeg(imagecreate(1, 1), $cache)) read_file($cache, 'image/jpeg', '1px placeholder image created and cached', null, true, $clone);
+    if(!filesize($cache) && imagejpeg(imagecreate(1, 1), $cache)) U::readfile($cache, 'image/jpeg', '1px placeholder image created and cached', true, $this->clone);
 
     // output created video thumbnail
-    read_file($cache, null, 'Video thumb created', null, true, $clone);
+    U::readfile($cache, 'image/jpeg', 'Video preview image created', true, $this->clone);
+  }
 
-  // resize image
-  } else if($resize){
-    if($mime && strtok($mime, '/') !== 'image') error('<strong>' . _basename($path) . '</strong> (' . $mime . ') is not an image.', 415);
-    foreach (['load_images', 'image_resize_enabled'] as $key) if(!config::$config[$key]) error('[' .$key . '] disabled.', 400);
-    $resize_dimensions = intval($resize);
-    if(!$resize_dimensions) error("Invalid resize parameter <strong>$resize</strong>.", 400);
-    $allowed = config::$config['image_resize_dimensions_allowed'] ?: [];
-    if(!in_array($resize_dimensions, array_merge([config::$config['image_resize_dimensions'], config::$config['image_resize_dimensions_retina']], array_map('intval', is_array($allowed) ? $allowed : explode(',', $allowed))))) error("Resize parameter <strong>$resize_dimensions</strong> is not allowed.", 400);
-    resize_image($path, $resize_dimensions, $clone);
+  // check if requested resize value is allowed
+  private function resize_allowed(){
+    if(empty($this->resize) || !is_numeric($this->resize)) return false;
+    if($this->resize === Config::get('image_resize_dimensions')) return true;
+    if($this->resize === Config::get('image_resize_dimensions_retina')) return true;
+    // check image_resize_dimensions_allowed array
+    $allowed = Config::get('image_resize_dimensions_allowed') ?: [];
+    return in_array($this->resize, array_filter(array_map('intval', is_array($allowed) ? $allowed : explode(',', $allowed))));
+  }
 
-  // proxy file
-  } else {
+  // get image preview resized image
+  private function get_image_preview(){
 
-    // disable if !proxy and path is within document root (file should never be proxied)
-    if(!config::$config['load_files_proxy_php'] && is_within_docroot($path)) error('File cannot be proxied.', 400);
+    // only image mime types can be resized
+    if($this->mime && strtok($this->mime, '/') !== 'image') U::error('Unsupported image type ' . $this->mime, 415);
 
-    // read file / $mime or 'application/octet-stream'
-    read_file($path, ($mime ?: 'application/octet-stream'), $msg = 'File ' . _basename($path) . ' proxied.', false, true);
+    // allow resize image only if config load_images and image_resize_enabled are enabled
+    foreach (['load_images', 'image_resize_enabled'] as $key) if(!Config::get($key)) U::error("Config $key disabled", 400);
+
+    // check if requested resize value is allowed
+    if(!$this->resize_allowed()) U::error("Resize parameter $this->resize is not allowed", 400);
+
+    // get ResizeImage()
+    new ResizeImage($this->path, $this->resize, $this->clone);
+  }
+
+  // get file proxied through PHP if it's not within document root
+  private function get_file_proxied(){
+
+    // don't allow getting file by proxy if !load_files_proxy_php and the file is available in document root
+    if(!Config::get('load_files_proxy_php') && Path::is_within_docroot($this->path)) U::error('File can\'t be proxied', 400);
+
+    // read file / $mime or 'application/octet-stream' if $mime is unknown (should not happen unless missing functions)
+    U::readfile($this->path, ($this->mime ?: 'application/octet-stream'), 'File proxied', true);
   }
 }
 
-// sharpen resized image
-function sharpen_image($image){
-  $matrix = array(
-    array(-1, -1, -1),
-    array(-1, 20, -1),
-    array(-1, -1, -1),
-  );
-  $divisor = array_sum(array_map('array_sum', $matrix));
-  $offset = 0;
-  imageconvolution($image, $matrix, $divisor, $offset);
-}
-
-// exif orientation
-// https://github.com/gumlet/php-image-resize/blob/master/lib/ImageResize.php
-function exif_orientation($orientation, &$image){
-  if(empty($orientation) || !is_numeric($orientation) || $orientation < 3 || $orientation > 8) return;
-  $image = imagerotate($image, array(6 => 270, 5 => 270, 3 => 180, 4 => 180, 8 => 90, 7 => 90)[$orientation], 0);
-  if(in_array($orientation, array(5, 4, 7)) && function_exists('imageflip')) imageflip($image, IMG_FLIP_HORIZONTAL);
-  return true;
-}
-
-// resize image
-function resize_image($path, $resize_dimensions, $clone = false){
-
-  // file size
-  $file_size = filesize($path);
-
-  // header props
-  $header_props = 'w:' . $resize_dimensions . ', q:' . config::$config['image_resize_quality'] . ', ' . config::$config['image_resize_function'] . ', cache:' . (config::$config['image_resize_cache'] ? '1' : '0');
-
-  // cache
-  $cache = config::$config['image_resize_cache'] ? get_image_cache_path($path, $resize_dimensions, $file_size, filemtime($path)) : NULL;
-  if($cache) read_file($cache, null, 'Resized image served from cache', $header_props, true, $clone);
-
-  // imagesize
-  $info = getimagesize($path);
-  if(empty($info) || !is_array($info)) error('Invalid image / failed getimagesize().', 500);
-  $resize_ratio = max($info[0], $info[1]) / $resize_dimensions;
-
-  // image_resize_max_pixels early exit
-  if(config::$config['image_resize_max_pixels'] && $info[0] * $info[1] > config::$config['image_resize_max_pixels']) error('Image resolution <strong>' . $info[0] . ' x ' . $info[1] . '</strong> (' . ($info[0] * $info[1]) . ' px) exceeds <strong>image_resize_max_pixels</strong> (' . config::$config['image_resize_max_pixels'] . ' px).', 400);
-
-  // header props
-  $header_props .= ', ' . $info['mime'] . ', ' . $info[0] . 'x' . $info[1] . ', ratio:' . round($resize_ratio, 2);
-
-  // check if image type is in image_resize_types / jpeg, png, gif, webp, bmp, avif
-  $is_resize_type = in_array(image_type_to_extension($info[2], false), array_map(function($key){
-    $type = trim(strtolower($key));
-    return $type === 'jpg' ? 'jpeg' : $type;
-  }, explode(',', config::$config['image_resize_types'])));
-
-  // serve original if !$is_resize_type || resize ratio < image_resize_min_ratio (only if $file_size <= load_images_max_filesize)
-  //if((!$is_resize_type || $resize_ratio < max(config::$config['image_resize_min_ratio'], 1)) && !read_file($path, $info['mime'], 'Original image served', $header_props, true, $clone)) error('File does not exist.', 404);
-  if((!$is_resize_type || ($resize_ratio < max(config::$config['image_resize_min_ratio'], 1) && $file_size <= config::$config['load_images_max_filesize'])) && !read_file($path, $info['mime'], 'Original image served', $header_props, true, $clone)) error('File does not exist.', 404);
-
-  // Calculate new image dimensions.
-  $resize_width  = round($info[0] / $resize_ratio);
-  $resize_height = round($info[1] / $resize_ratio);
-
-  // memory
-  $memory_limit = config::$config['image_resize_memory_limit'] && function_exists('ini_get') ? (int) @ini_get('memory_limit') : false;
-  if($memory_limit && $memory_limit > -1){
-    // $memory_required = ceil(($info[0] * $info[1] * 4 + $resize_width * $resize_height * 4) / 1048576);
-    $memory_required = round(($info[0] * $info[1] * (isset($info['bits']) ? $info['bits'] / 8 : 1) * (isset($info['channels']) ? $info['channels'] : 3) * 1.33 + $resize_width * $resize_height * 4) / 1048576, 1);
-    $new_memory_limit = function_exists('ini_set') ? max($memory_limit, config::$config['image_resize_memory_limit']) : $memory_limit;
-    if($memory_required > $new_memory_limit) error('Resizing this image requires at least <strong>' . $memory_required . 'M</strong>. Your current PHP memory_limit is <strong>' . $new_memory_limit .'M</strong>.', 400);
-    if($memory_limit < $new_memory_limit && @ini_set('memory_limit', $new_memory_limit . 'M')) $header_props .= ', ' . $memory_limit . 'M => ' . $new_memory_limit . 'M (min ' . $memory_required . 'M)';
-  }
-
-  // new dimensions headers
-  $header_props .= ', ' . $resize_width . 'x' . $resize_height;
-
-  // create new $image
-  $image = image_create_from($path, $info[2]);
-  if(!$image) error('Failed to create image resource.', 500);
-
-  // Create final image with new dimensions.
-  $new_image = imagecreatetruecolor($resize_width, $resize_height);
-  //$color = imagecolorallocate($new_image, 255, 255, 255); // replace transparency with white
-  //imagefill($new_image, 0, 0, $color); // replace transparency with white
-  if(!call_user_func(config::$config['image_resize_function'], $new_image, $image, 0, 0, 0, 0, $resize_width, $resize_height, $info[0], $info[1])) error('Failed to resize image.', 500);
-
-  // destroy original $image resource
-  imagedestroy($image);
-
-  // exif orientation
-  $exif = function_exists('exif_read_data') ? @exif_read_data($path) : false;
-  if(!empty($exif) && is_array($exif) && isset($exif['Orientation']) && exif_orientation($exif['Orientation'], $new_image)) $header_props .= ', orientated from EXIF:' . $exif['Orientation'];
-
-  // sharpen resized image
-  if(config::$config['image_resize_sharpen']) sharpen_image($new_image);
-
-  // save to cache
-  if($cache){
-    if(!imagejpeg($new_image, $cache, config::$config['image_resize_quality'])) error('<strong>imagejpeg()</strong> failed to create and cache resized image.', 500);
-
-    // clone cache (used for folder previews)
-    if($clone) @copy($cache, $clone);
-
-  // cache disabled / direct output
-  } else {
-    set_cache_headers();
-    header('content-type: image/jpeg');
-    header('files-msg: Resized image served [' . $header_props . ', ' . header_memory_time() . ']');
-    if(!imagejpeg($new_image, null, config::$config['image_resize_quality'])) error('<strong>imagejpeg()</strong> failed to create and output resized image.', 500);
-  }
-
-  // destroy image
-  imagedestroy($new_image);
-
-  // cache readfile
-  if($cache && !read_file($cache, null, 'Resized image cached and served', $header_props, true, $clone)) error('Cache file does not exist.', 404);
-
-  //
-  exit;
-}
-
-function get_url_path($dir){
-  if(!is_within_docroot($dir)) return false;
-
-  // if in __dir__ path, __dir__ relative
-  if(is_within_path($dir, config::$__dir__)) return $dir === config::$__dir__ ? '.' : substr($dir, strlen(config::$__dir__) + 1);
-
-  // doc root, doc root relative
-  return $dir === config::$doc_root ? '/' : substr($dir, strlen(config::$doc_root));
-}
-
-// get dir
-function get_dir($path, $files = false, $json_url = false){
-
-  // realpath
-  $realpath = $path ? real_path($path) : false;
-  if(!$realpath) return; // no real path for any reason
-  $symlinked = $realpath !== $path; // path is symlinked at some point
-
-  // exclude
-  if(is_exclude($path, true, $symlinked)) return; // exclude
-  if($symlinked && is_exclude($realpath, true, $symlinked)) return; // exclude check again symlink realpath
-
-  // vars
-  $filemtime = filemtime($realpath);
-  $url_path = get_url_path($realpath) ?: ($symlinked ? get_url_path($path) : false);
-  $is_readable = is_readable($realpath);
-  $basename = _basename($realpath) ?: _basename($path);
-
-  // array
-  $arr = array(
-    //'basename' => _basename($realpath) ?: _basename($path) ?: '',
-    'basename' => $basename || $basename === '0' ? $basename : '',
-    'fileperms' => substr(sprintf('%o', fileperms($realpath)), -4),
-    'filetype' => 'dir',
-    'is_readable' => $is_readable,
-    'is_writeable' => is_writeable($realpath),
-    'is_link' => $symlinked ? is_link($path) : false,
-    'is_dir' => true,
-    'mime' => 'directory',
-    'mtime' => $filemtime,
-    'path' => root_relative($path)
-  );
-
-  // url path
-  if($url_path) $arr['url_path'] = $url_path;
-
-  // get_files() || config::menu_load_all
-  if($files && $is_readable) {
-
-    // files array
-    $arr['files'] = get_files_data($path, $url_path, $arr['dirsize'], $arr['files_count'], $arr['images_count'], $arr['preview']);
-  }
-
-	// json cache path
-  if($json_url && config::$storage_is_within_doc_root && !config::$has_login && config::$config['cache']){
-    $json_cache = get_json_cache_url(get_dir_cache_hash($realpath, $filemtime));
-    if($json_cache) $arr['json_cache'] = $json_cache;
-  }
-
-  //
-	return $arr;
-}
-
-// get menu sort
-function get_menu_sort($dirs){
-  if(strpos(config::$config['menu_sort'], 'date') === 0){
-    usort($dirs, function($a, $b) {
-      return filemtime($a) - filemtime($b);
-    });
-  } else {
-    natcasesort($dirs);
-  }
-  return substr(config::$config['menu_sort'], -4) === 'desc' ? array_reverse($dirs) : $dirs;
-}
-
-// escape [brackets] in folder names (it's complicated)
-function glob_escape($path){
-  return preg_match('/\[.+]/', $path) ? str_replace(['[',']', '\[', '\]'], ['\[','\]', '[[]', '[]]'], $path) : $path;
-}
-
-// recursive directory scan
-function get_dirs($path = false, &$arr = array(), $depth = 0) {
-
-  // get this dir (ignore root, unless load all ... root already loaded into page)
-  if($depth || config::$config['menu_load_all']) {
-    $data = get_dir($path, config::$config['menu_load_all'], !config::$config['menu_load_all']);
-    if(!$data) return $arr;
-
-    //
-    $arr[] = $data;
-
-    // max depth
-    if(config::$config['menu_max_depth'] && $depth >= config::$config['menu_max_depth']) return $arr;
-
-    // don't recursive if symlink
-    if($data['is_link'] && !config::$config['menu_recursive_symlinks']) return $arr;
-  }
-
-  // get dirs from files array if $data['files'] or glob subdirs
-  // disabled, because symlink absolute paths will mess up the menu, and it's not worth it.
-  /*$subdirs = isset($data['files']) ? array_filter(array_map(function($file) use ($path){
-    return $file['filetype'] === 'dir' ? root_absolute($file['path']) : false;
-  }, $data['files'])) : glob(glob_escape($path) . '/*', GLOB_NOSORT|GLOB_ONLYDIR);*/
-  $subdirs = glob(glob_escape($path) . '/*', GLOB_NOSORT|GLOB_ONLYDIR);
-
-  // sort and loop subdirs
-  if(!empty($subdirs)) foreach(get_menu_sort($subdirs) as $subdir) get_dirs($subdir, $arr, $depth + 1);
-
-  // return
-  return $arr;
-}
-
-// encode to UTF-8 when required
-function safe_iptc_tag($val){
-  $val = @substr($val, 0, 1000);
-  return @mb_detect_encoding($val, 'UTF-8', true) ? $val : @utf8_encode($val);
-}
-
-// get IPTC
-function get_iptc($image_info){
-	if(!$image_info || !isset($image_info['APP13']) || !function_exists('iptcparse')) return;
-	$app13 = @iptcparse($image_info['APP13']);
-	if(empty($app13)) return;
-	$iptc = array();
-
-  // loop title, headline, description, creator, credit, copyright, keywords, city, sub-location and province-state
-  foreach (['title'=>'005', 'headline'=>'105', 'description'=>'120', 'creator'=>'080', 'credit'=>'110', 'copyright'=>'116', 'keywords'=>'025', 'city'=>'090', 'sub-location'=>'092', 'province-state'=>'095'] as $name => $code) {
-    if(isset($app13['2#' . $code][0]) && !empty($app13['2#' . $code][0])) $iptc[$name] = $name === 'keywords' ? $app13['2#' . $code] : safe_iptc_tag($app13['2#' . $code][0]);
-  }
-
-  // return IPTC
-	return $iptc;
-}
-
-// EXIF timestamps always relative to UTC/GMT / Prevent app failure if date strings are malformed
-function exif_timestamp($str){
-  try {
-    return (new DateTime($str, new DateTimeZone('UTC')))->getTimestamp();
-  } catch (Exception $e) {
-    return false;
-  }
-}
-
-// get exif
-function get_exif($path){
-  if(!function_exists('exif_read_data')) return;
-	$exif_data = @exif_read_data($path, 'ANY_TAG', 0);
-  if(empty($exif_data) || !is_array($exif_data)) return;
-	$exif = array();
-	foreach (array('DateTime', 'DateTimeOriginal', 'ExposureTime', 'FNumber', 'FocalLength', 'Make', 'Model', 'Orientation', 'ISOSpeedRatings', 'Software') as $name) {
-    $val = isset($exif_data[$name]) ? $exif_data[$name] : false;
-    if($val) $exif[$name] = strpos($name, 'DateTime') === 0 ? exif_timestamp($val) : (is_string($val) ? trim($val) : $val);
-	}
-
-	// computed ApertureFNumber (f_stop)
-	if(isset($exif_data['COMPUTED']['ApertureFNumber'])) $exif['ApertureFNumber'] = $exif_data['COMPUTED']['ApertureFNumber'];
-
-	// flash
-	//if(isset($exif_data['Flash'])) $exif['Flash'] = ($exif_data['Flash'] & 1) != 0;
-
-	// GPS
-  $exif['gps'] = get_image_location($exif_data);
-
-	// return
-	return array_filter($exif);
-}
-
-// exif GPS / get_image_location
-function get_image_location($exif) {
-  $arr = array();
-  foreach (array('GPSLatitude', 'GPSLongitude') as $key) {
-    if(!isset($exif[$key]) || !isset($exif[$key.'Ref'])) return false;
-    $coordinate = $exif[$key];
-    if(is_string($coordinate)) $coordinate = array_map('trim', explode(',', $coordinate));
-    for ($i = 0; $i < 3; $i++) {
-      $part = explode('/', $coordinate[$i]);
-      if (count($part) == 1) {
-        $coordinate[$i] = $part[0];
-      } else if (count($part) == 2) {
-        if($part[1] == 0) return false; // can't be 0 / invalid GPS
-        $coordinate[$i] = floatval($part[0])/floatval($part[1]);
-      } else {
-        $coordinate[$i] = 0;
-      }
-    }
-    list($degrees, $minutes, $seconds) = $coordinate;
-    $sign = ($exif[$key.'Ref'] == 'W' || $exif[$key.'Ref'] == 'S') ? -1 : 1;
-    $arr[] = $sign * ($degrees + $minutes/60 + $seconds/3600);
-  }
-  return empty($arr) ? false : $arr;
-}
-
-//
-function get_files_data($dir, $url_path = false, &$dirsize = 0, &$files_count = 0, &$images_count = 0, &$preview = false){
-
-  // scandir
-  $filenames = scandir($dir, SCANDIR_SORT_NONE);
-  if(empty($filenames)) return array();
-  $items = array();
-
-  // look for folder_preview_default (might be excluded in loop)
-  if(config::$config['folder_preview_default'] && in_array(config::$config['folder_preview_default'], $filenames)) $preview = config::$config['folder_preview_default'];
-
-  // loop filenames
-  foreach($filenames as $filename) {
-
-    //
-    if($filename === '.' || $filename === '..') continue;
-    $path = $dir . '/' . $filename;
-
-    // paths
-    $realpath = real_path($path); // differs from $path only if is symlinked
-    if(!$realpath) continue; // no real path for any reason, for example symlink dead
-    $symlinked = $realpath !== $path; // path is symlinked at some point
-
-    // filetype
-    $filetype = filetype($realpath);
-    $is_dir = $filetype === 'dir' ? true : false;
-
-    // exclude
-    if(is_exclude($path, $is_dir, $symlinked)) continue; // exclude
-    if($symlinked && is_exclude($realpath, $is_dir, $symlinked)) continue; // exclude check again symlink realpath
+// class ResizeImage / serves a resized image
+class ResizeImage {
+
+  // set a different fill color than black (default) for images with transparency / disabled by default []
+  // only enable when strictly required, as it will assign fill color also for non-transparent images
+  public static $fill_color = []; // white [255, 255, 255];
+
+  // class properties
+  private $path;        // full path to image
+  private $rwidth;      // calculated resize width
+  private $rheight;     // calculated resize height
+  private $pixels;      // used to check if pixels > max_pixels and to calculate required memory
+  private $bits;        // extracted from getimagesize() for use in set_memory_limit()
+  private $channels;    // extracted from getimagesize() for use in set_memory_limit()
+  private $dst_image;   // destination image GD resource with resize dimensions, also used in sharpen() and exif_orientation()
+
+  // construct resize image, all processes in due order
+  public function __construct($path, $resize, $clone = false){
 
     // vars
-    if(!$is_dir) $files_count ++; // files count
-    $is_link = $symlinked ? is_link($path) : false; // symlink
-    $basename = $is_link ? (_basename($realpath) ?: $filename) : $filename;
-    $filemtime = filemtime($realpath);
-    $is_readable = is_readable($realpath);
-    $filesize = $is_dir ? false : filesize($realpath);
-    if($filesize) $dirsize += $filesize;
+    $this->path = $path;
+    $filesize = filesize($this->path);
 
-    // url_path / symlink
-    $item_url_path = $symlinked ? get_url_path($realpath) : false; // url_path from realpath if symlinked
-    if(!$item_url_path && $url_path) $item_url_path = $url_path . ($url_path === '/' ? '' : '/') . ($is_link ? _basename($path) : $basename);
-
-    // root path // path relative to config::$root
-    if(!$symlinked || is_within_root($realpath)){
-      $root_path = root_relative($realpath);
-
-    // path is symlinked and !is_within_root(), get path-relative
-    } else {
-
-      // root path to symlink
-      $root_path = root_relative($path);
-
-      // check for symlink loop
-      if($is_link && $is_dir && $path && $root_path) {
-        $basename_path = _basename($root_path);
-        if($basename_path && preg_match('/(\/|^)' . $basename_path. '\//', $root_path)){
-          $loop_path = '';
-          $segments = explode('/', $root_path);
-          array_pop($segments);
-          foreach ($segments as $segment) {
-            $loop_path .= ($loop_path ? '/' : '') . $segment;
-            if($segment !== $basename_path) continue;
-            $loop_abs_path = root_absolute($loop_path);
-            if(!is_link($loop_abs_path) || $realpath !== real_path($loop_abs_path)) continue;
-            $root_path = $loop_path;
-            $item_url_path = get_url_path($loop_abs_path) ?: $item_url_path; // new symlink is within doc_root
-            break;
-          }
-        }
-      }
+    // create local $short vars from config 'image_resize_*' options, because it's much easier and more readable
+    foreach (['cache', 'types', 'quality', 'function', 'sharpen', 'memory_limit', 'max_pixels', 'min_ratio'] as $key) {
+      $$key = Config::get("image_resize_$key");
     }
 
-    // add properties
-    $item = array(
-      'basename' => $basename,
-      'fileperms' => substr(sprintf('%o', fileperms($realpath)), -4),
+    // add to response headers
+    U::message(['cache ' . ($cache ? 'ON' : 'OFF'), "resize $resize", "quality $quality", $function]);
+
+    // get cache path for image (or null for imagejpeg())
+    $cache_path = $cache ? Path::imagecachepath($this->path, $resize, $filesize, filemtime($this->path)) : null;
+
+    // attempt to load $cache_path / will simply fail if $cache_path does not exist
+    if($cache_path) U::readfile($cache_path, 'image/jpeg', 'Resized image from cache', true, $clone);
+
+    // getimagesize / original dimensions, image type, bits, channels and mime
+    $imagesize = getimagesize($this->path);
+    if(empty($imagesize) || !is_array($imagesize)) U::error('Failed getimagesize()', 500); // die!
+
+    // vars extrapolated from $imagesize
+    $width = (int) $imagesize[0]; // (int) because AVIF might return '0x0'
+    $height = (int) $imagesize[1]; // (int) because AVIF might return '0x0'
+    $ratio = max($width, $height) / $resize; // calculate resize ratio from image longest side (width or height)
+    $this->rwidth = round($width / $ratio); // calculate resize width
+    $this->rheight = round($height / $ratio); // calculate resize height
+    $this->pixels = $width * $height; // used to check if pixels > max_pixels and to calculate required memory
+    $type = $imagesize[2]; // returns one of the IMAGETYPE_XXX constants indicating the type of the image.
+    $mime = isset($imagesize['mime']) && is_string($imagesize['mime']) ? $imagesize['mime'] : false;
+    $this->bits = isset($imagesize['bits']) && is_numeric($imagesize['bits']) ? $imagesize['bits'] : 8;
+    $this->channels = isset($imagesize['channels']) && is_numeric($imagesize['channels']) ? $imagesize['channels'] : 3;
+
+    // get image type extension or die / used to check if $ext is in `image_resize_types` and for "imagecreatefrom$ext"() function
+    $ext = image_type_to_extension($type, false) ?: U::error("Invalid image type $type");
+
+    // add more calculated values to response headers
+    U::message([$mime, $ext, "$width x $height", 'ratio ' . round($ratio, 2), "$this->rwidth x $this->rheight"]);
+
+    // if image extension is not in `image_resize_types`, attempt to serve original if filesize is <= `load_images_max_filesize`
+    if(!in_array($ext, $this->get_resize_types($types))){
+
+      // exit if original image exceeds `load_images_max_filesize`
+      if($filesize > Config::get('load_images_max_filesize')) U::error("Image $ext is not in `image_resize_types`, and can't serve original because filesize $filesize exceeds `load_images_max_filesize` " . Config::get('load_images_max_filesize') . ' bytes', 400);
+
+      // attempt to serve original or error
+      if(!U::readfile($this->path, $mime, 'Original image served because image is not within image_resize_types', true, $clone)) U::error('File does not exist', 404);
+    }
+
+    // exit if image pixels (dimensions) exceeds 'image_resize_max_pixels' => 60000000 (default)
+    if($max_pixels && $this->pixels > $max_pixels) U::error("Image pixels $this->pixels ($width x $height) exceeds `image_resize_max_pixels` $max_pixels", 400);
+
+    // serve original if resize ratio < min_ratio, but only if filesize <= load_images_max_filesize
+    if($ratio < max($min_ratio, 1) && $filesize <= Config::get('load_images_max_filesize') && !U::readfile($this->path, $mime, "Original image served, because resize ratio $ratio < min_ratio $min_ratio", true, $clone)) U::error('File does not exist', 404);
+
+    // prepare imagecreatefrom$EXT() to create image GD resource from path
+    $imagecreatefrom = "imagecreatefrom$ext";
+    if(!function_exists($imagecreatefrom)) U::error("Function $imagecreatefrom() does not exist", 500);
+
+    // check if avaialble memory is sufficient to resize image, and attempt to temporarily assign higher memory_limit
+    $this->set_memory_limit($memory_limit);
+
+    // create new source image GD resource from path
+    $src_image = $imagecreatefrom($this->path) ?: U::error("Function $imagecreatefrom() failed", 500);
+
+    // create destination image GD resource with resize dimensions
+    $this->dst_image = imagecreatetruecolor($this->rwidth, $this->rheight) ?: U::error('Function imagecreatetruecolor() failed', 500);
+
+    // set a different fill color than black (default) for images with transparency / disabled by default $fill_color = []
+    $this->set_fill_color($ext);
+
+    // imagecopyresampled() src_image to dst_image
+    if(!($function)($this->dst_image, $src_image, 0, 0, 0, 0, $this->rwidth, $this->rheight, $width, $height)) U::error("Function $function() failed", 500);
+
+    // destroy src_image GD resource to free up memory
+    imagedestroy($src_image);
+
+    // rotate resized image according to exif image orientation if required
+    $this->exif_orientation();
+
+    // sharpen resized images, because default PHP imagecopyresized() make images blurry ...
+    if($sharpen) $this->sharpen();
+
+    // add headers for direct output if !cache / missing content-length but that's ok
+    if(!$cache_path) U::header('Resized image served', true, 'image/jpeg');
+
+    // create jpg image in cache path or output directly if !cache
+    if(!imagejpeg($this->dst_image, $cache_path, $quality)) U::error('PHP imagejpeg() failed', 500);
+
+    // destroy dst_image resource to free up memory
+    imagedestroy($this->dst_image);
+
+    // cache readfile
+    if($cache_path && !U::readfile($cache_path, 'image/jpeg', 'Resized image served', true, $clone)) U::error('Cache file does not exist', 404);
+
+    // always exit
+    exit;
+  }
+
+  // check if avaialble memory is sufficient to resize image, and attempt to temporarily assign new memory_limit
+  private function set_memory_limit($memory_limit){
+    // config image_resize_memory_limit must be assigned
+    if(empty($memory_limit)) return;
+    // get memory_limit in MB
+    $current = U::get_memory_limit_mb();
+    // pointless to make any assumptions if we can't get default memory_limit, just try to resize ...
+    if(empty($current)) return;
+    // calculate approximate required memory to resize image
+    $required = round(($this->pixels * $this->bits / 8 * $this->channels * 1.33 + $this->rwidth * $this->rheight * 4) / 1048576, 1);
+    // get new memory_limit, assigned from config image_resize_memory_limit, if higher than $current
+    $new = function_exists('ini_set') ? max($current, $memory_limit) : $current;
+    // error if required memory > available memory
+    if($required > $new) U::error("Resizing this image requires >= {$required}M. Your PHP memory_limit is {$new}M", 400);
+    // assign $new memory from config image_resize_memory_limit if > $current (default memory_limit)
+    if($new > $current && @ini_set('memory_limit', $new . 'M')) U::message("{$current}M => {$new}M (min {$required}M)");
+  }
+
+  // get resize types array from config 'image_resize_types' => 'jpeg, png, gif, webp, bmp, avif'
+  private function get_resize_types($types){
+    return array_filter(array_map(function($key){
+      $type = trim(strtolower($key));
+      return $type === 'jpg' ? 'jpeg' : $type;
+    }, explode(',', $types)));
+  }
+
+  // sharpen resized images, because default PHP imagecopyresized() make images blurry ...
+  private function sharpen(){
+    $matrix = [
+      [-1, -1, -1],
+      [-1, 20, -1],
+      [-1, -1, -1],
+    ];
+    $divisor = array_sum(array_map('array_sum', $matrix));
+    $offset = 0;
+    imageconvolution($this->dst_image, $matrix, $divisor, $offset);
+  }
+
+  // rotate resized image according to exif image orientation (no way we deal with this in browser)
+  private function exif_orientation(){
+    // attempt to get image exif array
+    $exif = Exif::exif($this->path);
+    // exit if there is no exif orientation value
+    if(!$exif || !isset($exif['Orientation'])) return;
+    // assign $orientation
+    $orientation = $exif['Orientation'];
+    // array of orientation values to rotate (4, 5 and 7  will also be flipped)
+    $orientation_to_rotation = [3 => 180, 4 => 180, 5 => 270, 6 => 270, 7 => 90, 8 => 90];
+    // return if orientation is not valid or is not in array (does not require rotation)
+    if(!array_key_exists($orientation, $orientation_to_rotation)) return;
+    // rotate image according to exif $orientation, write back to already-resized image destination resource
+    $this->dst_image = imagerotate($this->dst_image, $orientation_to_rotation[$orientation], 0);
+    // after rotation, orientation values 4, 5 and 7 also need to be flipped in place
+    if(in_array($orientation, [4, 5, 7]) && function_exists('imageflip')) imageflip($this->dst_image, IMG_FLIP_HORIZONTAL);
+    // add header props
+    U::message("orientated from EXIF $orientation");
+  }
+
+  // sets a different fill color than black (default) for images with transparency / disabled by default
+  private function set_fill_color($ext){
+    if(!is_array(self::$fill_color) || count(self::$fill_color) !== 3 || !in_array($ext, ['png', 'gif', 'webp', 'avif'])) return;
+    $color = call_user_func_array('imagecolorallocate', array_merge([$this->dst_image], self::$fill_color));
+    if(imagefill($this->dst_image, 0, 0, $color)) U::message('Fill rgb(' . join(', ', self::$fill_color) . ')');
+  }
+}
+
+// class Dirs / outputs menu json from dir structure
+class Dirs {
+
+  // vars
+  private $dirs = []; // array of dirs to output when re-creating
+  private $cache_file = false; // cache file path / gets assigned to a path if cache is enabled
+  private $load_files = false; // load files into each menu dir if Config::get('menu_load_all')
+
+  // construct Dirs
+  public function __construct(){
+
+    // first check and assign cache / returns cache json if valid
+    $this->check_cache();
+
+    // load files in each dir if config menu_load_all
+    $this->load_files = Config::get('menu_load_all');
+
+    // if not cached, get dirs starting from root dir
+    $this->get_dirs(Config::$root);
+
+    // outputs dirs json format and cache
+    Json::cache($this->dirs, 'Dirs reloaded', $this->cache_file);
+  }
+
+  // check cache for menu and return if valid
+  private function check_cache(){
+
+    // exit if cache disabled
+    if(!Config::get('cache')) return;
+
+    // get cache hash from POST menu_cache_hash so we can assign correct cache file
+    $hash = U::post('menu_cache_hash');
+
+    // validate $hash to make sure we check and create correct cache file names (not strictly necessary, but just in case)
+    if(!$hash || !preg_match('/^.{6}\..{6}\..\d+$/', $hash)) Json::error('Invalid menu cache hash');
+
+    // assign cache file when cache is enabled / check if file exists, or write to this file when re-creating
+    $this->cache_file = Config::$cachepath . "/menu/$hash.json";
+
+    // return if cache file does not exist
+    if(!file_exists($this->cache_file)) return;
+
+    // get json from cache file
+    $json = @file_get_contents($this->cache_file);
+
+    // return if the file is empty (for some reason)
+    if(empty($json)) return;
+
+    // check if menu cache is valid by comparing folder modified dates
+    if(!$this->menu_cache_is_valid($json)) return;
+
+    // assign headers
+    U::header('Valid menu cache', null, 'application/json');
+
+    // if browser has valid menu cache stored, just confirm cache is valid // don't use Json::exit, because we already set header
+    if(U::post('localstorage')) exit(json_encode(['localstorage' => true]));
+
+    // output json cache file
+    exit($json);
+  }
+
+  // check if json menu cache is valid by comparing folder dates (modified time)
+  private function menu_cache_is_valid($json){
+    if(!Config::get('menu_cache_validate')) return true; // don't validate deep levels beyond 2
+    $arr = @json_decode($json, true); // create array to compare times
+    if(empty($arr)) return;
+    // loop dirs and compare modified-time to check if cache is valid / skip shallow 1st level dirs
+    foreach ($arr as $val) {
+      if(strpos($val['path'], '/') !== false && $val['mtime'] !== @filemtime(Path::rootpath($val['path']))) return;
+    }
+    return $json; // it's valid, because json folder dates match real folder dates
+  }
+
+  // get_dirs recursive directories
+  private function get_dirs($path, $depth = 0) {
+
+    // load data for dir / ignore depth 0 (root), because it's already loaded, unless load_files
+    if($depth || $this->load_files) {
+
+      // return if dir is excluded
+      if(Path::is_exclude($path, true)) return;
+
+      // get array of data for dir, including files load_files (config menu_load_all)
+      $data = (new Dir($path))->load($this->load_files);
+
+      // exit if empty / should not happen, but just on case
+      if(empty($data)) return;
+
+      // assign dir $data to array of $dirs
+      $this->dirs[] = $data;
+
+      // exit if current depth >= config menu_max_depth (don't get subdirs)
+      if(Config::get('menu_max_depth') && $depth >= Config::get('menu_max_depth')) return;
+
+      // exit if item is symlink and don't follow symlinks (don't get subdirs)
+      if($data['is_link'] && !Config::get('menu_recursive_symlinks')) return;// $arr;
+    }
+
+    // get subdirs from current path
+    $subdirs = U::glob("$path/*", true);
+
+    // sort subdirs and get data for each dir (including further subdirs)
+    if(!empty($subdirs)) foreach($this->sort($subdirs) as $subdir) $this->get_dirs($subdir, $depth + 1);
+  }
+
+  // sort subfolders
+  private function sort($dirs){
+    if(strpos(Config::get('menu_sort'), 'date') === 0){
+      usort($dirs, function($a, $b) {
+        return filemtime($a) - filemtime($b);
+      });
+    } else {
+      natcasesort($dirs);
+    }
+    return substr(Config::get('menu_sort'), -4) === 'desc' ? array_reverse($dirs) : $dirs;
+  }
+}
+
+// class Dir / loads data array for a single dir with or without files
+class Dir {
+
+  // vars
+  public $data; // array of public data to be returned / shared with File
+  public $path; // path of dir / shared with File
+  public $realpath; // dir realpath, normally the same as $path, unless $path contains symlink
+  private $filemtime; // dir filemtime (modified time), used for cache validation and data
+  private $filenames; // array of file names in dir
+  private $cache_path; // calculated json file cache path
+
+  // construct assign common vars
+  public function __construct($path){
+    $this->path = $path;
+    $this->realpath = $path ? Path::realpath($path) : false;
+    $this->filemtime = filemtime($this->realpath);
+    $this->cache_path = $this->get_cache_path();
+  }
+
+  // get dir json from cache, or reload / used by main dir files action request
+  public function json(){
+
+    // return json cache file if exists
+    if(U::readfile($this->cache_path, 'application/json', 'JSON served from cache')) return;
+
+    // reload, encode as json, and store json cache file
+    Json::cache($this->load(true), 'JSON created', $this->cache_path);
+  }
+
+  // get dir array from cache or reload / used in Document class when getting dir arrays for root and start path
+  public function get(){
+
+    // get cache if valid, also returns files[] array as bonus since it's already cached
+    if($this->cache_is_valid()) return json_decode(file_get_contents($this->cache_path), true);
+
+    // reload dir without files (we don't want to delay Document with this, unless cached)
+    return $this->load();
+  }
+
+  // load dir array / used when dir is not cached (always by menu get_dirs())
+  public function load($files = false){
+
+    // dir array
+    $this->data = [
+      'basename' => U::basename($this->path),
+      'fileperms' => substr(sprintf('%o', fileperms($this->realpath)), -4),
+      'filetype' => 'dir',
+      'is_readable' => is_readable($this->realpath),
+      'is_writeable' => is_writeable($this->realpath),
+      'is_link' => is_link($this->path),
+      'is_dir' => true,
+      'mime' => 'directory',
+      'mtime' => $this->filemtime,
+      'path' => Path::relpath($this->path), // if path is realpath and is symlinked, it might be wrong
+      'files_count' => 0,
+      'dirsize' => 0,
+      'images_count' => 0,
+      'url_path' => Path::urlpath($this->path)
+    ];
+
+    // get files[] array for dir
+    if($files) $this->get_files();
+
+    // assign direct url to json cache file for faster loading from javascript / used by Dirs class (menu), only when !files
+    // won't work if you have blocked public web access to cache dir files / if so, comment out the below line
+    if(!$files) $this->set_json_cache_url();
+
+    // return data array for this dir
+  	return $this->data;
+  }
+
+  // get json cache path for dir (does not validate if cache file exists)
+  private function get_cache_path(){
+    if(!Config::get('cache') || !$this->realpath) return;
+    return Config::$cachepath . '/folders/' . U::dirs_hash() . '.' . substr(md5($this->realpath), 0, 6) . '.' . $this->filemtime . '.json';
+  }
+
+  // used to check if json cache file exists, and therefore is valid
+  private function cache_is_valid(){
+    return $this->cache_path && file_exists($this->cache_path);
+  }
+
+  // assign direct url to json cache file for faster loading from javascript / used by Dirs class (menu)
+  private function set_json_cache_url(){
+    // don't allow direct access if login or !public or !valid cache
+    if(Config::$has_login || !$this->cache_is_valid() || !Path::is_within_docroot(Config::$storagepath)) return;
+    $this->data['json_cache'] = Path::urlpath($this->cache_path);
+  }
+
+  // optional get array of files from dir / only gets called if file data should be loaded
+  private function get_files(){
+
+    // forget it if we can't read dir
+    if(!$this->data['is_readable']) return;
+
+    // start files array, even if empty (so we know it's an empty folder)
+    $this->data['files'] = [];
+
+    // scandir for filenames
+    $this->filenames = scandir($this->path, SCANDIR_SORT_NONE);
+
+    // exit if dir is empty
+    if(empty($this->filenames)) return;
+
+    // loop filenames add to $this->data['files']
+    foreach($this->filenames as $filename) {
+
+      // skip dots
+      if(in_array($filename, ['.', '..'])) continue;
+
+      // add file to $this->data['files'] array
+      new File($this, $filename);
+  	}
+
+    // sort files by natural case, with dirs on top (already sorts in javascript, but faster when pre-sorted in cache)
+    uasort($this->data['files'], function($a, $b){
+      if(!Config::get('sort_dirs_first') || $a['is_dir'] === $b['is_dir']) return strnatcasecmp($a['basename'], $b['basename']);
+      return $b['is_dir'] ? 1 : -1;
+    });
+  }
+}
+
+// class File / returns data array for a single file
+class File {
+
+  // vars
+  private $dir; // parent dir object
+  private $file; // file array
+  private $realpath; // realpath of item, in case symlinked, faster access for various operations
+  private $image = []; // image data array, populated and assigned to $this->file['image'] if file is image
+  private $image_info; // image_info from getimagesize() to get IPTC
+
+  // public construct file
+  public function __construct($dir, $filename){
+
+    // parent dir object
+    $this->dir = $dir;
+
+    // assemble full path from parent dir path
+    $path = $this->dir->path . '/' . $filename;
+
+    // get resolved realpath, to check if file truly exists (symlink target could be deaf), and for faster function access
+    $this->realpath = Path::realpath($path); // may differ from $path if symlinked
+
+    // exit if no realpath for some reason, for example symlink target is dead
+    if(!$this->realpath) return;
+
+    // path is symlinked if realpath differs from $path
+    $symlinked = $this->realpath !== $path;
+
+    // get filetype
+    $filetype = filetype($this->realpath);
+
+    // determine if file is dir
+    $is_dir = $filetype === 'dir' ? true : false;
+
+    // skip item if excluded
+    if(Path::is_exclude($path, $is_dir, $symlinked)) return;
+
+    // count file into parent dir
+    if(!$is_dir) $this->dir->data['files_count'] ++;
+
+    // check if file is symlink (only if realpath !== path)
+    $is_link = $symlinked ? is_link($path) : false;
+
+    // get filesize if !$is_dir
+    $filesize = $is_dir ? 0 : filesize($this->realpath);
+
+    // append filesize to parent dirsize
+    $this->dir->data['dirsize'] += $filesize;
+
+    // add properties to file array
+    $this->file = [
+      'basename' => $filename,
+      'ext' => $is_dir ? '' : U::extension($is_link ? $this->realpath : $filename, true),
+      'fileperms' => substr(sprintf('%o', fileperms($this->realpath)), -4),
       'filetype' => $filetype,
       'filesize' => $filesize,
-      'is_readable' => $is_readable,
-      'is_writeable' => is_writeable($realpath),
+      'is_readable' => is_readable($this->realpath),
+      'is_writeable' => is_writeable($this->realpath),
       'is_link' => $is_link,
       'is_dir' => $is_dir,
-      'mtime' => $filemtime,
-      'path' => $root_path
-    );
+      'mtime' => filemtime($this->realpath),
+      'path' => ltrim($this->dir->data['path'] . '/', '/') . $filename,
+      'url_path' => Path::urlpath($path)
+    ];
 
-    // optional props
-    $ext = !$is_dir ? substr(strrchr($realpath, '.'), 1) : false;
-    if($ext) {
-      $ext = strtolower($ext);
-      $item['ext'] = $ext;
-    }
-    $mime = $is_dir ? 'directory' : ($is_readable && (!$ext || $ext === 'ts' || config::$config['get_mime_type']) ? get_mime($realpath) : false);
-    if($mime) $item['mime'] = $mime;
-    if($item_url_path) $item['url_path'] = $item_url_path;
+    // assign file mime type / will return null for most files unless config get_mime_type = true (slow)
+    $this->file['mime'] = $this->mime();
 
-    // image / check from mime, fallback to extension
-    $is_image = $is_dir ? false : ($mime ? (strtok($mime, '/') === 'image' && !strpos($mime, 'svg')) : in_array($ext, array('gif','jpg','jpeg','jpc','jp2','jpx','jb2','png','swf','psd','bmp','tiff','tif','wbmp','xbm','ico','webp', 'avif')));
-    if($is_image){
-
-      // imagesize
-      $imagesize = $is_readable ? @getimagesize($realpath, $info) : false;
-
-      // image count and icon
-      $images_count ++;
-      $item['icon'] = 'image';
-
-      // is imagesize
-      if(!empty($imagesize) && is_array($imagesize)){
-
-        // set folder_preview
-        if(!$preview && in_array($ext, array('gif','jpg','jpeg','png'))) $preview = $basename;
-
-        // start image array
-        $image = array();
-        foreach (array(0 => 'width', 1 => 'height', 2 => 'type', 'bits' => 'bits', 'channels' => 'channels', 'mime' => 'mime') as $key => $name) if(isset($imagesize[$key])) $image[$name] = $imagesize[$key];
-
-        // mime from image
-        if(!$mime && isset($image['mime'])) $item['mime'] = $image['mime'];
-
-        // IPTC
-        $iptc = $info ? get_iptc($info) : false;
-        if(!empty($iptc)) $image['iptc'] = $iptc;
-
-        // EXIF
-        $exif = get_exif($realpath);
-        if(!empty($exif)) {
-          $image['exif'] = $exif;
-          if(isset($exif['DateTimeOriginal'])) $item['DateTimeOriginal'] = $exif['DateTimeOriginal'];
-          // invert width/height if exif orientation
-          if(isset($exif['Orientation']) && $exif['Orientation'] > 4 && $exif['Orientation'] < 9){
-            $image['width'] = $imagesize[1];
-            $image['height'] = $imagesize[0];
-          }
-        }
-
-        // panorama equirectangular if w/h === 2 / find resized panoramas '_files_{size}_{filename.jpg}'
-        if($item_url_path && $imagesize[0] && $imagesize[0] > 2048 && $imagesize[0]/$imagesize[1] === 2){
-          $panorama_resized = [];
-          // check for resizes if resize >= original
-          foreach ([2048, 4096, 8192] as $resize) {
-            if($resize >= $imagesize[0]) break;
-            if(file_exists($dir . '/_files_' . $resize . '_' . $filename)) $panorama_resized[] = $resize;
-          }
-          if(!empty($panorama_resized)) $item['panorama_resized'] = array_reverse($panorama_resized);
-        }
-
-        // image resize cache direct
-        if(config::$image_resize_cache_direct){
-          $resize1 = get_image_cache_path($realpath, config::$config['image_resize_dimensions'], $filesize, $filemtime);
-          if(file_exists($resize1)) $image['resize' . config::$config['image_resize_dimensions']] = get_url_path($resize1);
-          $retina = config::$image_resize_dimensions_retina;
-          if($retina){
-            $resize2 = get_image_cache_path($realpath, $retina, $filesize, $filemtime);
-            if(file_exists($resize2)) $image['resize' . $retina] = get_url_path($resize2);
-          }
-        }
-
-        // add image to item
-        $item['image'] = $image;
-
-      // get real mime if getimagesize fails. Could be non-image disguised as image extension
-      } else if($is_readable && !$mime){
-        $mime = get_mime($realpath);
-        if($mime) {
-          $item['mime'] = $mime;
-          if(strtok($mime, '/') !== 'image'){ // unset images_count and icon because is not image after all
-            $images_count --;
-            unset($item['icon']);
-          }
-        }
-      }
+    // assign image data if file is image
+    $this->set_image_data();
 
     // read .URL shortcut files and present as links / https://fileinfo.com/extension/url
-    } else if($is_readable && $ext === 'url'){
-      $url_lines = @file($realpath);
-      if(!empty($url_lines) && is_array($url_lines)) foreach ($url_lines as $str) if(preg_match('/^url\s*=\s*([\S\s]+)/i', trim($str), $url_matches) && !empty($url_matches) && isset($url_matches[1])){
-        $item['url'] = $url_matches[1];
-        break;
-      }
+    $this->set_file_url();
+
+    // add to dir files array with filename as key
+    $this->dir->data['files'][$filename] = $this->file;
+  }
+
+  // get file mime type if !extension of config get_mime_type is enabled
+  private function mime(){
+    if($this->file['is_dir']) return 'directory'; // directory
+    if(!$this->file['is_readable']) return null; // skip and return null
+    if(!$this->file['ext'] || $this->file['ext'] === 'ts' || Config::get('get_mime_type')) return U::mime($this->realpath);
+    return null; // don't check mime, mime will be detected from extension in javascript
+  }
+
+  // assign image data if file is image
+  private function set_image_data(){
+
+    // first check if item seems like an image by checking mime or extension
+    if(!$this->is_image()) return;
+
+    // count image in dir, assuming it's some kind of image, even if !getimagesize() or !readable
+    $this->dir->data['images_count'] ++;
+
+    // pre-assign image icon, assuming it's some kind of image, even if !getimagesize() or !readable
+    $this->file['icon'] = 'image';
+
+    // getimagesize() wrapper, populates and re-formats $this->image / exit if empty
+    if(!$this->getimagesize()) return;
+
+    // assign item mime from getimagesize() because it is more accurate and we might not have file mime yet anyway
+    if(isset($this->image['mime'])) $this->file['mime'] = $this->image['mime'];
+
+    // get image Iptc
+    $this->image['iptc'] = Iptc::get($this->image_info);
+
+    // get image Exif
+    $this->image['exif'] = Exif::get($this->realpath);
+
+    // invert image width height if exif orientation is > 4 && < 9, because dimensions should match browser-oriented image
+    $this->image_orientation_flip_dimensions();
+
+    // find optional panorama sizes `_files_{size}_{filename.jpg}` for equirectangular 2/1 aspect panorama images
+    $this->image_panorama_sizes();
+
+    // get image resize cache for direct access by javascript if config image_resize_cache_direct
+    $this->get_image_resize_cache();
+
+    // remove empty values and add image array to file output
+    $this->file['image'] = array_filter($this->image);
+  }
+
+  // check if file seems to be an image by means of mime type or extension
+  private function is_image(){
+    if($this->file['is_dir']) return;
+    if($this->file['mime']) return strpos($this->file['mime'], 'image/') === 0;
+    return in_array($this->file['ext'], ['gif','jpg','jpeg','jpc','jp2','jpx','jb2','png','swf','psd','bmp','tiff','tif','wbmp','xbm','ico','webp','avif','svg']);
+  }
+
+  // getimagesize() wrapper validates and re-formats output into $this->image array
+  private function getimagesize(){
+
+    // exit
+    if(!$this->file['is_readable'] || $this->file['ext'] === 'svg') return;
+
+    // getimagesize()
+    $imagesize = @getimagesize($this->realpath, $this->image_info);
+
+    // exit on invalid $imagesize
+    if(empty($imagesize) || !is_array($imagesize)) return;
+
+    // re-format properties from getimagesize() into $this->image array
+    foreach ([
+      'width',
+      'height',
+      'type',
+      'bits' => 'bits',
+      'channels' => 'channels',
+      'mime' => 'mime'
+    ] as $key => $name) if(isset($imagesize[$key])) $this->image[$name] = $imagesize[$key];
+
+    // valid if array is !empty
+    return !empty($this->image);
+  }
+
+  // if image is oriented by some Exif orientation values, we need to flip width and height properties to match browser orientation
+  private function image_orientation_flip_dimensions(){
+    if(!isset($this->image['exif']['Orientation']) || !in_array($this->image['exif']['Orientation'], [5, 6, 7, 8])) return;
+    list($this->image['width'], $this->image['height']) = [$this->image['height'], $this->image['width']]; // flip width/height
+  }
+
+  // find optional panorama sizes `_files_{size}_{filename.jpg}` for equirectangular 2/1 aspect panorama images
+  private function image_panorama_sizes(){
+    // must be public image (url_path), with >= 2024 and exactly 2:1 aspect ratio (equirectangular)
+    if(!$this->file['url_path'] || !$this->image['width'] || $this->image['width'] <= 2048 || $this->image['width'] / $this->image['height'] !== 2) return;
+    $resized = [];
+    foreach ([2048, 4096, 8192] as $width) { // look for sizes 2048, 4096 and 8192
+      if($width >= $this->image['width']) break; // break loop if resized image width >= original already
+      if(file_exists($this->dir->realpath . '/_files_' . $width . '_' . $this->file['basename'])) $resized[] = $width;
     }
+    if(!empty($resized)) $this->file['panorama_resized'] = array_reverse($resized);
+  }
 
-    // add to items with basename as key
-    $items[$basename] = $item;
-	}
+  // get image resize cache for direct access by javascript if config image_resize_cache_direct
+  private function get_image_resize_cache(){
+    if(!U::image_resize_cache_direct()) return;
+    foreach ([Config::get('image_resize_dimensions'), U::image_resize_dimensions_retina()] as $resize) {
+      if(!$resize) continue;
+      $cache_file = Path::imagecachepath($this->realpath, $resize, $this->file['filesize'], $this->file['mtime']);
+      if(file_exists($cache_file)) $this->image["resize$resize"] = Path::urlpath($cache_file);
+    }
+  }
 
-  // Sort dirs on top and natural case sort / sorts in JS anyway, but improves performance if stored in json cache
-  uasort($items, function($a, $b){
-    if(!config::$config['sort_dirs_first'] || $a['is_dir'] === $b['is_dir']) return strnatcasecmp($a['basename'], $b['basename']);
-    return $b['is_dir'] ? 1 : -1;
-  });
-
-	//
-	return $items;
-}
-
-// get files
-function get_files($dir){
-
-  // invalid $dir
-  if(!$dir) json_error('Invalid directory');
-
-  // cache
-  $cache = get_dir_cache_path(real_path($dir));
-
-  // read cache or get dir and cache
-  if(!read_file($cache, 'application/json', 'files json served from cache')) {
-    json_cache(get_dir($dir, true), 'files json created' . ($cache ? ' and cached' : ''), $cache);
+  // read and parse .URL shortcut files and present as links / https://fileinfo.com/extension/url
+  private function set_file_url(){
+    if(!$this->file['is_readable'] || $this->file['ext'] !== 'url') return;
+    $lines = @file($this->realpath);
+    if(empty($lines) || !is_array($lines)) return;
+    foreach ($lines as $str) {
+      if(!preg_match('/^url\s*=\s*([\S\s]+)/i', trim($str), $matches) || !isset($matches[1])) continue;
+      $this->file['url'] = $matches[1];
+      break;
+    }
   }
 }
 
-/* start here */
-function post($param){
-	return isset($_POST[$param]) && !empty($_POST[$param]) ? $_POST[$param] : false;
-}
-function get($param){
-	return isset($_GET[$param]) && !empty($_GET[$param]) ? $_GET[$param] : false;
-}
-function json_cache($arr = array(), $msg = false, $cache = true){
-  $json = empty($arr) ? '{}' : json_encode($arr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PARTIAL_OUTPUT_ON_ERROR);
-  if(empty($json)) json_error(json_last_error() ? json_last_error_msg() : 'json_encode() error');
-	if($cache) @file_put_contents($cache, $json);
-	if($msg) header('files-msg: ' . $msg . ' [' . header_memory_time() . ']');
-  header('content-type: application/json');
-	echo $json;
-}
-function json_error($error = 'Error'){
-  json_exit(array('error' => $error));
-}
-function json_success($success = 'Success'){
-  json_exit(array('success' => $success));
-}
-function json_toggle($success, $error){
-  json_exit(array_filter(array('success' => $success, 'error' => empty($success) ? $error : 0)));
-}
-function json_exit($arr = array()){
-  header('content-type: application/json');
-  exit(json_encode($arr));
-}
-function error($msg, $code = false){
-  // 400 Bad Request, 403 Forbidden, 401 Unauthorized, 404 Not Found, 500 Internal Server Error
-  if($code) http_response_code($code);
-  header('content-type: text/html');
-  header('Expires: ' . gmdate('D, d M Y H:i:s') . ' GMT');
-  header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, s-maxage=0');
-  header('Cache-Control: post-check=0, pre-check=0', false);
-  header('Pragma: no-cache');
-	exit('<h2>Error</h2>' . $msg);
-}
+// class Iptc / extract IPTC image data from images
+class Iptc {
 
-// get valid menu cache
-function get_valid_menu_cache($cache){
-  if(!$cache || !file_exists($cache)) return;
-  $json = @file_get_contents($cache);
-  if(empty($json)) return;
-  if(!config::$config['menu_cache_validate']) return $json;
-  $arr = @json_decode($json, true);
-  if(empty($arr)) return;
-  foreach ($arr as $key => $val) {
-    $path = $val['path'];
-    if(strpos($path, '/') !== false && $val['mtime'] !== @filemtime(root_absolute($path))) return; // skip shallow 1st level dirs, and compare filemtime
+  // array of iptc entries with their corresponding codes to extract from IPTC, which otherwise contains tons of junk
+  public static $entries = [
+    'title' => '005',
+    'headline' => '105',
+    'description' => '120',
+    'creator' => '080',
+    'credit' => '110',
+    'copyright' => '116',
+    'keywords' => '025',
+    'city' => '090',
+    'sub-location' => '092',
+    'province-state' => '095'
+  ];
+
+  // get iptc tag values, might be an array (keywords) or first array item (string) / attempts to fix invalid utf8
+  private static function tag($value){
+
+    // might be an array like 'keywords', just output array
+    if(count($value) > 1) return $value;
+
+    // get trimmed string value
+    $string = isset($value[0]) && is_string($value[0]) ? trim($value[0]) : false;
+
+    // invalid or empty string
+    if(empty($string)) return false;
+
+    // clamp string at 1000 chars, because some messed up images include a dump of garbled junk
+    $clamped = function_exists('mb_substr') ? @mb_substr($string, 0, 1000) : @substr($string, 0, 1000);
+
+    // return original string if the above didn't work for some ridiculous reason
+    if(!$clamped) return $string;
+
+    // return string if we can't detect valid utf-8 or string is already valid utf-8
+    if(!function_exists('mb_convert_encoding') || preg_match('//u', $clamped)) return $clamped;
+
+    // attempt to convert the encoding
+    $converted = @mb_convert_encoding($clamped, 'UTF-8', @mb_list_encodings());
+
+    // return converted value if successful
+    return $converted ?: $clamped;
   }
-  return $json;
-}
 
-// get root dirs
-function get_root_dirs(){
-  $root_dirs = glob(config::$root . '/*', GLOB_ONLYDIR|GLOB_NOSORT);
-  if(empty($root_dirs)) return array();
-  return array_filter($root_dirs, function($dir){
-    return !is_exclude($dir, true, is_link($dir));
-  });
-}
+  // get iptc from $image_info (getimagesize($path, $image_info))
+  public static function get($i){
 
-// get menu cache hash
-function get_menu_cache_hash($root_dirs){
-  $mtime_count = filemtime(config::$root);
-  foreach ($root_dirs as $root_dir) $mtime_count += filemtime($root_dir);
-  return substr(md5(config::$doc_root . config::$__dir__ . config::$root), 0, 6) . '.' . substr(md5(config::$version . config::$config['cache_key'] . config::$config['menu_max_depth'] . config::$config['menu_load_all'] . (config::$config['menu_load_all'] ? config::$config['files_exclude'] . config::$image_resize_cache_direct : '') . config::$has_login . config::$config['dirs_exclude'] . config::$config['menu_sort']), 0, 6) . '.' . $mtime_count;
-}
+    // get iptc from $image_info (getimagesize($path, $image_info))
+    $iptc = !empty($i) && is_array($i) && isset($i['APP13']) && function_exists('iptcparse') ? @iptcparse($i['APP13']) : false;
 
-// get dirs
-function dirs(){
+    // return empty array if falsy, error or empty[] response
+    if(empty($iptc)) return [];
 
-  // get menu_cache_hash
-  if(config::$config['cache']){
-    $menu_cache_hash = post('menu_cache_hash'); // get menu cache hash
-    $menu_cache_arr = $menu_cache_hash ? explode('.', $menu_cache_hash) : false;
-    if(!$menu_cache_arr ||
-      count($menu_cache_arr) !== 3 ||
-      strlen($menu_cache_arr[0]) !== 6 ||
-      strlen($menu_cache_arr[1]) !== 6 ||
-      !is_numeric($menu_cache_arr[2])
-    ) json_error('Invalid menu cache hash'); // early exit
-  }
-  $cache = config::$config['cache'] ? config::$cache_path . '/menu/' . $menu_cache_hash . '.json' : false; // get cache path
-  $json = $cache ? get_valid_menu_cache($cache) : false; // get valid json menu cache
+    // populate $entries from $iptc
+    $output = [];
+    foreach (self::$entries as $name => $code) {
+      $value = isset($iptc['2#' . $code]) ? $iptc['2#' . $code] : false;
+      $output[$name] = !empty($value) && is_array($value) ? self::tag($value) : false;
+    }
 
-  // $json is valid from menu cache file
-  if($json){
-    header('content-type: application/json');
-    header('files-msg: valid menu cache hash [' . $menu_cache_hash . ']' . (!config::$config['menu_cache_validate'] ? '[deep validation disabled]' : '') . '[' . header_memory_time() . ']');
-    echo (post('localstorage') ? '{"localstorage":"1"}' : $json);
-
-  // reload dirs
-  } else {
-    json_cache(get_dirs(config::$root), 'dirs reloaded' . ($cache ? ' and cached.' : ' [cache disabled]'), $cache);
+    // return array with all non-empty values
+    return array_filter($output);
   }
 }
 
-// include file html, php, css, js
-function get_include($file){
-  if(!config::$storage_path) return;
-  $path = config::$storage_path . '/' . $file;
-  if(!file_exists($path)) return;
-  $ext = pathinfo($path, PATHINFO_EXTENSION);
-  if(in_array($ext, ['html', 'php'])) return include $path;
-  if(!config::$storage_is_within_doc_root) return;
-  $src = get_url_path($path) . '?' . filemtime($path);
-  if($ext === 'js') echo '<script src="' . $src . '"></script>';
-  if($ext === 'css') echo '<link href="' . $src . '" rel="stylesheet">';
-}
+// class Exif / extract Exif image data from images
+class Exif {
 
-// POST
-if(post('action')){
+  // these are the values we want
+  public static $entries = [
+    'ApertureFNumber',  // from exif COMPUTED values
+    //'CCDWidth'        // from exif COMPUTED values
+    //'DateTime',       // only used to detect original photo time, if DateTimeOriginal is not defined
+    'DateTimeOriginal', // original photo taken time, which will replace the file's date
+    'ExposureTime',
+    //'FNumber',
+    'FocalLength',
+    //'Make',           // normally pointless when there is 'Model'
+    'Model',
+    'Orientation',      // used only for Javascript to detect the orientation of the image and display appropriately
+    'ISOSpeedRatings',
+    //'Software',
+  ];
 
-	// post action
-	$action = post('action');
+  // returns the exif data array from an image, if function exists and exif array is valid
+  public static function exif($path){
+    $exif = function_exists('exif_read_data') ? @exif_read_data($path) : false;
+    return !empty($exif) && is_array($exif) ? $exif : false;
+  }
 
-  //
-  new config();
+  // get Exif $entries for a specific image
+  public static function get($path){
 
-  // filemanager actions [beta]
-  if($action === 'fm') {
+    // get exif
+    $exif = self::exif($path);
+    if(!$exif) return;
 
-    // validate task
-    $task = post('task');
-    if(empty($task) || !isset(config::$config['allow_' . $task]) || !config::$config['allow_' . $task]) json_error('invalid task');
-    // demo_mode
-    if(config::$config['demo_mode']) json_error('Action not allowed in demo mode');
+    // start output array
+    $output = [];
 
-    // valid path / path must be inside assigned root
-    $is_dir = post('is_dir');
-    $post_path = post('path') ?: '';
-    $path = valid_root_path($post_path, $is_dir);
-    if(empty($path)) json_error('invalid path ' . $post_path);
-    $path = real_path($path); // in case of symlink path
-
-    // name_is_allowed / trim name, fail if empty or dodgy characters, mkfile, mkdir, rename, duplicate
-    function name_is_allowed($name){
-      $name = $name ? trim($name) : false; // trim
-      // block empty / <>:"'/\|?*# chars / .. / endswith .
-      if(empty($name) || preg_match('/[<>:"\'\/\\\|?*#]|\.\.|\.$/', $name)) json_error('invalid name ' . $name);
-      return $name; // return valid trimmed name
+    // loop $entries, check in $exif and $exif['COMPUTED'] and add to ouput
+    foreach (self::$entries as $key) {
+      $output[$key] = isset($exif[$key]) ? $exif[$key] : (isset($exif['COMPUTED'][$key]) ? $exif['COMPUTED'][$key] : false);
     }
 
-    // filemanager json_toggle
-    function fm_json_toggle($success, $error){
-      fm_json_exit($success, array_filter(array('success' => $success, 'error' => empty($success) ? $error : 0)));
-    }
-    // filemanager json_exit / includes feature to invalidate X3 cache if x3-plugin active
-    function fm_json_exit($success, $arr){
-      $x3 = config::$x3_path && $success ? config::$x3_path . '/app/x3.inc.php' : false;
-      if($x3 && @file_exists($x3) && @is_writable($x3)) touch($x3);
-      json_exit($arr);
-    }
+    // get GPS coordinates
+    $output['gps'] = self::gps($exif);
 
-    // UPLOAD
-    if($task === 'upload'){
-      // upload path must be dir
-      if(!$is_dir) json_error('invalid dir ' . $post_path);
-      // upload path must be writeable
-      if(!is_writable($path)) json_error('upload dir ' . $post_path . ' is not writeable');
-      // get $_FILES['file']
-      $file = isset($_FILES) && isset($_FILES['file']) && is_array($_FILES['file']) ? $_FILES['file'] : false;
-      // invalid $_FILES['file']
-      if(empty($file) || !isset($file['error']) || is_array($file['error'])) json_error('invalid $_FILES[]');
-      // PHP meaningful file upload errors / https://www.php.net/manual/en/features.file-upload.errors.php
-      if($file['error'] !== 0) {
-        $upload_errors = array(
-          1 => 'Uploaded file exceeds upload_max_filesize directive in php.ini',
-          2 => 'Uploaded file exceeds MAX_FILE_SIZE directive specified in the HTML form',
-          3 => 'The uploaded file was only partially uploaded',
-          4 => 'No file was uploaded',
-          6 => 'Missing a temporary folder',
-          7 => 'Failed to write file to disk.',
-          8 => 'A PHP extension stopped the file upload.'
-        );
-        json_error(isset($upload_errors[$file['error']]) ? $upload_errors[$file['error']] : 'unknown error');
-      }
-      // invalid $file['size']
-      if(!isset($file['size']) || empty($file['size'])) json_error('invalid file size');
-      // $file['size'] must not exceed $config['upload_max_filesize']
-      if(config::$config['upload_max_filesize'] && $file['size'] > config::$config['upload_max_filesize']) json_error('File size [' . $file['size'] . '] exceeds upload_max_filesize option [' . config::$config['upload_max_filesize'] . ']');
-      // filename
-      $filename = $file['name'];
-      // security: slashes are never ever allowed in filenames / always basenamed() but just in case
-      if(strpos($filename, '/') !== false || strpos($filename, '\\') !== false) json_error('Illegal \slash/ in filename ' . $filename);
-      // allow only valid file types from config::$config['upload_allowed_file_types'] / 'image/*, .pdf, .mp4'
-      $allowed_file_types = !empty(config::$config['upload_allowed_file_types']) ? array_filter(array_map('trim', explode(',', config::$config['upload_allowed_file_types']))) : false;
-      if(!empty($allowed_file_types)){
-        $mime = get_mime($file['tmp_name']) ?: $file['type']; // mime from PHP or upload[type]
-        $ext = strrchr(strtolower($filename), '.');
-        $is_valid = false;
-        // check if extension match || wildcard match mime type image/*
-        foreach ($allowed_file_types as $allowed_file_type) if($ext === ('.'.ltrim($allowed_file_type, '.')) || fnmatch($allowed_file_type, $mime)) {
-          $is_valid = true;
-          break;
+    // remove empty values and return array
+    return array_filter($output);
+  }
+
+  // get GPS coordinates in array
+  private static function gps($exif){
+
+    // prepare array for coordinates
+    $arr = [];
+
+    // loop to get coordinates
+    foreach (['GPSLatitude', 'GPSLongitude'] as $key) {
+
+      // invalid exif
+      if(!isset($exif[$key]) || !isset($exif[$key . 'Ref'])) return false;
+
+      // coordinate array
+      $coordinate = is_string($exif[$key]) ? array_map('trim', explode(',', $exif[$key])) : $exif[$key];
+
+      // loop
+      for ($i = 0; $i < 3; $i++) {
+        $part = explode('/', $coordinate[$i]);
+        if(count($part) == 1) {
+          $coordinate[$i] = $part[0];
+        } else if (count($part) == 2) {
+          if(empty($part[1])) return false; // invalid GPS, $part[1] can't be 0
+          $coordinate[$i] = floatval($part[0]) / floatval($part[1]);
+        } else {
+          $coordinate[$i] = 0;
         }
-        if(!$is_valid) json_error('invalid file type ' . $filename);
-        // extra security: check if image is image
-        if(function_exists('exif_imagetype') && in_array($ext, ['.gif', '.jpeg', '.jpg', '.png', '.swf', '.psd', '.bmp', '.tif', '.tiff', 'webp', 'avif']) && !@exif_imagetype($file['tmp_name'])) json_error('invalid image type ' . $filename);
       }
 
-      // file naming if !overwrite and file exists
-      if(config::$config['upload_exists'] !== 'overwrite' && file_exists("$path/$filename")){
-
-        // fail if !increment / 'upload_exists' => 'fail' || false || '' empty
-        if(config::$config['upload_exists'] !== 'increment') json_error("$filename already exists");
-
-        // increment filename / 'upload_exists' => 'increment'
-        $name = pathinfo($filename, PATHINFO_FILENAME);
-        $ext = pathinfo($filename, PATHINFO_EXTENSION);
-        $inc = 1;
-        while(file_exists($path . '/' . $name . '-' . $inc . '.' . $ext)) $inc ++;
-        $filename = $name . '-' . $inc . '.' . $ext;
-      }
-
-      // all is well! attempt to move_uploaded_file()
-      if(@move_uploaded_file($file['tmp_name'], "$path/$filename")) fm_json_exit(true, array(
-        'success' => true,
-        'filename' => $filename, // return filename in case it was incremented or renamed
-        'url' => get_url_path("$path/$filename") // for usage with showLinkToFileUploadResult
-      ));
-
-      // error if failed to move uploaded file
-      json_error('failed to move_uploaded_file()');
-
-    // DELETE
-    } else if($task === 'delete'){
-
-      // dir recursive
-      if($is_dir){
-
-        // success/fail count
-        $success = 0;
-        $fail = 0;
-
-        // recursive rmdir
-        function rrmdir($dir, &$success, &$fail) {
-          //global $success, $fail;
-          if(!is_readable($dir)) return $fail ++;
-          $files = array_diff(scandir($dir), array('.','..'));
-          if(!empty($files)) foreach ($files as $file) {
-            is_dir("$dir/$file") ? rrmdir("$dir/$file", $success, $fail) : (@unlink("$dir/$file") ? $success++ : $fail++);
-          }
-          @rmdir($dir) ? $success ++ : $fail ++;
-        }
-
-        // recursive rmdir start
-        rrmdir($path, $success, $fail);
-
-        // response with partial success/fail count or error if there is !$success
-        fm_json_exit($success, array_filter(array('success' => $success, 'fail' => $fail, 'error' => (empty($success) ? 'Failed to delete dir' : 0))));
-
-      // single file
-      } else {
-        fm_json_toggle(@unlink($path), 'PHP unlink() failed');
-      }
-
-    // new_folder || new_file
-    } else if($task === 'new_folder' || $task === 'new_file'){
-      if(!$is_dir) json_error('invalid dir ' . $post_path); // parent path must be dir
-      if(!is_writable($path)) json_error($post_path . ' is not writeable.'); // dir must be writeable
-      $name = name_is_allowed(post('name')); // trim and check valid
-      $file_path = $path . '/' . $name;
-      if(file_exists($file_path)) json_error($name . ' already exists');
-      fm_json_toggle($task === 'new_folder' ? @mkdir($file_path) : @touch($file_path), $task . ' failed');
-
-    // rename $path (file or dir)
-    } else if($task === 'rename'){
-      if(!is_writable($path)) json_error($post_path . ' is not writeable.'); // path must be writeable
-      $name = name_is_allowed(post('name')); // trim and check valid
-      $new_path = dirname($path) . '/' . $name;
-      if(file_exists($new_path)) json_error("$name already exists."); // new name exists
-      // security: prevent renaming 'file.html' to 'file.php' / file must already be *.php when renaming
-      if(!$is_dir && stripos($path, '.php') === false && stripos($name, '.php') !== false) json_error('cannot rename files to .php');
-      fm_json_toggle(@rename($path, $new_path), 'PHP rename() failed');
-
-    // duplicate file
-    } else if($task === 'duplicate'){
-      if($is_dir) json_error('Can\'t duplicate dir');
-      $parent_dir = dirname($path);
-      if(!is_writable($parent_dir)) json_error(_basename($parent_dir) . ' is not writeable.'); // dir must be writeable
-      $name = name_is_allowed(post('name')); // trim and check valid
-      $copy_path = $parent_dir . '/' . $name;
-      if(file_exists($copy_path)) json_error($name . ' already exists.');
-      fm_json_toggle(@copy($path, $copy_path), 'PHP copy() failed');
-
-    // text / code edit
-    } else if($task === 'text_edit'){
-      if($is_dir) json_error('Can\'t write text to directory');
-      if(!is_writeable($path) || !is_file($path)) json_error('File is not writeable');
-      $success = isset($_POST['text']) && @file_put_contents($path, $_POST['text']) !== false ? 1 : 0; // text could be '' (empty)
-      if($success) @touch(dirname($path)); // invalidate any cache by updating parent dir mtime
-      fm_json_toggle($success, 'PHP file_put_contents() failed');
+      // output
+      list($degrees, $minutes, $seconds) = $coordinate;
+      $sign = in_array($exif[$key . 'Ref'], ['W', 'S']) ? -1 : 1;
+      $arr[] = $sign * ($degrees + $minutes / 60 + $seconds / 3600);
     }
 
-	// dirs
-	} else if($action === 'dirs'){
-    dirs(post('localstorage'));
+    // return array
+    return !empty($arr) ? $arr : false;
+  }
+}
 
-	// files
-	} else if($action === 'files'){
-    if(!isset($_POST['dir'])) json_error('Missing dir parameter');
-    get_files(valid_root_path($_POST['dir'], true));
+// class Filemanager / functions that handle file operations on server
+class Filemanager {
 
-	// file read
-	} else if($action === 'file'){
+  // success counter for multi-item actions
+  static $success = 0;
+  static $count = 0;
 
-    // valid path
-    $file = valid_root_path(post('file'));
-    if(!$file) error('Invalid file path');
+  // file manager actions JSON response / accepts true/false or array with success property
+  public static function json($res, $err){
 
-    // read text file
-    header('content-type:text/plain;charset=utf-8');
-    if(@readfile(real_path($file)) === false) error('failed to read file ' . post('file'), 500);
+    // create $arr from boolean with $arr['success'] or pass through existing array
+    $arr = is_array($res) ? $res : ['success' => $res];
+
+    // assign complete error if action was !success (not even partially success)
+    if(!isset($arr['success']) || empty($arr['success'])) return Json::error($err);
+
+    // on success, invalidate X3 cache if x3-plugin active
+    X3::invalidate();
+
+    // output success / remove empty values, because javascript don't need em
+    Json::exit(array_filter($arr));
+  }
+
+  // check if name is allowed and return trimmed value / duplicate, new_file, new_folder, rename, zip
+  // for security and practical reasons, don't allow invalid characters <>:"'/\|?*# or .. or ends with .
+  public static function name_is_allowed($name = false){
+    return !empty($name) && is_string($name) && !ctype_space($name) && !preg_match('/[<>:"\'\/\\\|?*#]|\.\.|\.$/', $name);
+  }
+
+  // get unique incremental filename for functions like duplicate and zip / default increment name starts at 2
+  public static function get_unique_filename($path, $i = 2) {
+
+    // die if already unique
+    if(!file_exists($path)) return $path;
+
+    // break path into filename and extension
+    $pathinfo = pathinfo($path);
+    $filename = $pathinfo['filename']; // file name without extension for numbering
+    $ext = !is_dir($path) && !empty($pathinfo['extension']) ? '.' . $pathinfo['extension'] : ''; // extension append to filename
+
+    // check if file is numbered already like file-3.jpg, so we can assign to file-4.jpg instead of file-3-2.jpg
+    $numbered_name = explode('-', $filename);
+    $current_count = array_pop($numbered_name);
+    if(count($numbered_name) && is_numeric($current_count)) {
+      $filename = join('-', $numbered_name);
+      $i = $current_count + 1;
+    }
+
+    // increment filename if file already exists / default start by filename-2.ext
+    while (file_exists($path)) {
+      $path = $pathinfo['dirname'] . '/' . $filename . '-' . $i . $ext;
+      $i++;
+    }
+
+    // return first available $path
+    return $path;
+  }
+
+  // recursive iterator for copy, delete, duplicate
+  protected static function iterator($path, $mode = RecursiveIteratorIterator::SELF_FIRST){
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS), $mode, RecursiveIteratorIterator::CATCH_GET_CHILD);
+    self::$count += iterator_count($iterator);
+    return $iterator;
+  }
+
+  // delete single file or folder
+  private static function delete_file_or_folder($path){
+    return is_dir($path) ? @rmdir($path) : @unlink($path);
+  }
+
+  // delete single file or folder recursively
+  public static function delete($path){
+
+    // if dir, iterate recursively and attempt to delete all descendants
+    // check if_writeable() will skip dirs that are not writeable, because we can't delete direct children. However, we may still be able to delete deep descendants, so might as well try to delete what can be deleted.
+    if(is_dir($path)/* && is_writable($path)*/) foreach (self::iterator($path, RecursiveIteratorIterator::CHILD_FIRST) as $item) self::$success += self::delete_file_or_folder($item->getPathname());
+
+    // delete file or folder after first deleting recursive items in folder
+    return self::delete_file_or_folder($path);
+  }
+
+  // non-recursive copy single file or folder / creates folder when necessary
+  private static function copy_file_or_folder($from, $to){
+    // if(Path::is_exclude($to, is_dir($from))) return false; // exclude copy $to paths? kinda pointless
+    if(Path::is_within_path($to, $from)) return false; // don't allow copying files or dirs into self or same location
+    //if(!is_readable($from)) return false; // already checked in valid_rootpath() filter
+    if(is_dir($from)) return is_dir($to) || @mkdir($to, 0777, true); // is_dir already or make new dir
+    if(!is_readable($from)) return false; // can't read file source / might be recursive file
+    if(file_exists($to) && filemtime($to) >= filemtime($from)) return false; // file already exists and is newer than source
+    if(!@copy($from, $to)) return false; // attempt to copy from to / overwrite existing older files in $to location
+    @touch($to, filemtime($from)); // inherit file modified time
+    return true; // return success
+  }
+
+  // copy single file or folder recursively / kinda how the default php copy() should have worked? Also used for duplicate
+  public static function copy($from, $to){
+    if(!self::copy_file_or_folder($from, $to)) return false; // only continue on success
+    if(is_dir($from)) {
+      $iterator = self::iterator($from);
+      foreach ($iterator as $descendant) self::$success += self::copy_file_or_folder($descendant, $to . '/' . $iterator->getSubPathName());
+    }
+    return true;
+  }
+
+  // move file or folder / uses rename() wihch is recursive by default
+  private static function move($from, $to){
+    // if(Path::is_exclude($to, is_dir($from))) return false; // exclude move $to paths? Kinda pointless
+    if(Path::is_within_path($to, $from)) return false; // don't allow moving files or dirs into self or same location
+    if(file_exists($to) && filemtime($to) >= filemtime($from)) return false; // $to already exists and is newer than $from
+    return @rename($from, $to); // can overwrite existing older files, but fails to overwrite non-empty dirs, which is ok
+  }
+
+  // duplicate single file or folder recursively incrementing filename (if filename provided, use copy($from, $to) instead)
+  public static function duplicate($path){
+
+    // copy item recursively with unique incremental file name
+    return self::copy($path, self::get_unique_filename($path));
+  }
+
+  // run action on array of files and folders / return succes/fail array
+  public static function items($action, $paths, $dir = false){
+
+    // count paths / recursive iterators may add to count
+    self::$count = count($paths);
+
+    // loops paths
+    foreach ($paths as $path) self::$success += self::$action($path, ($dir ? $dir . '/' . U::basename($path) : false));
+
+    // return success and fail count
+    return ['success' => self::$success, 'fail' => self::$count - self::$success];
+  }
+
+  // return an array of downloadable files from within an array of $paths
+  public static function get_downloadables($paths){
+
+    // prepare downloadables array
+    $downloadables = [];
+
+    // loop dir $paths / only dir $paths are forwarded to check recursively, as JS already knows the files
+    foreach ($paths as $dir) {
+      if(Path::is_exclude($dir, true)) continue; // shouldn't be necessary when forwarded from frontend, but just in case
+      foreach (self::iterator($dir) as $item) { // loop dirs get all descendants
+        $path = $item->getPathname();
+        // create download list from readable, non-excluded files only (not dirs, as we don't download a dir)
+        if(!is_readable($path) || is_dir($path) || Path::is_exclude($path, false)) continue;
+        // send to Javascript
+        $downloadables[] = [
+          'path' => Path::relpath($path),
+          'url_path' => Path::urlpath($path),
+          'basename' => U::basename($path),
+          'ext' => U::extension($path),
+          'filesize' => filesize($path)
+        ];
+      }
+    }
+
+    // return downloadables array
+    return $downloadables;
+  }
+}
+
+// class Zipper / extends Filemanager / create and extract zip files
+class Zipper extends Filemanager {
+
+  // vars
+  private $zip;
+  private $is_json;
+
+  // construct check class_exists('ZipArchive') and create new ZipArchive
+  public function __construct($is_json = false){
+    $this->is_json = $is_json;
+    if(!class_exists('ZipArchive')) U::error('Missing PHP ZipArchive class', 500, $this->is_json);
+    $this->zip = new ZipArchive();
+  }
+
+  // generic open zip with errors
+  private function open($dest, $flags = null){
+
+    // open zip
+    $res = @$this->zip->open($dest, $flags);
+
+    // return error type messages / https://www.php.net/manual/en/ziparchive.open.php
+    $zip_open_errors = [
+      4 => 'Seek error.',
+      5 => 'Read error.',
+      9 => 'No such file.',
+      11 => 'Can\'t open file.',
+      10 => 'File already exists.',
+      14 => 'Malloc failure.',
+      18 => 'Invalid argument.',
+      19 => 'Not a zip archive.',
+      21 => 'Zip archive inconsistent.'
+    ];
+
+    //  die if error
+    if($res !== true) U::error($res && isset($zip_open_errors[$res]) ? $zip_open_errors[$res] : 'Unknown zip error', 500, $this->is_json);
+  }
+
+  // extract $zip_file into $dir (optional) / $dir is parent of zip if not set
+  public function extract($zip_file, $dir = false){
+
+    // check valid zip
+    if(!is_file($zip_file) || U::extension($zip_file, true) !== 'zip' || empty(filesize($zip_file))) U::error('Invalid zip file', 400, $this->is_json);
+
+    // $dir is parent of zip if not set
+    if(!$dir) $dir = dirname($zip_file);
+
+    // check target_dir writeable
+    if(!is_writable($dir)) U::error('Target dir is not writeable', 403, $this->is_json);
+
+    // open zip file
+    $this->open($zip_file);
+
+    // extract to target_dir
+    $success = @$this->zip->extractTo($dir);
+
+    // return always close() and $success
+    return @$this->zip->close() && $success;
+  }
+
+  // create a new $zip_file from multiple $paths
+  public function create($paths, $zip_file = false){
+
+    //
+    $first_path = reset($paths);
+
+    // create zip root from first array path, so we can create relative local paths inside zip
+    $root = dirname($first_path) . '/';
+
+    // unique incremental 'archive.zip' if multiple paths or filename.jpg.zip (don't append .zip if extension already zip)
+    if(!$zip_file) $zip_file = self::get_unique_filename($root . (count($paths) > 1 ? 'archive.zip' : U::basename($first_path) . (U::extension($first_path, true) !== 'zip' ? '.zip' : '')));
+
+    // create new zip file or die
+    $this->open($zip_file, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+
+    // loop $paths to add files
+    foreach ($paths as $path) {
+
+      // add file or dir / if added and is_dir, add file or dir recursively
+      if($this->add_file_or_dir($path, $root) && is_dir($path)) foreach(self::iterator($path) as $file) $this->add_file_or_dir($file, $root);
+    }
+
+    // detect files count in zip
+    $num_files = version_compare(PHP_VERSION, '7.2.0') >= 0 ? $this->zip->count() : $this->zip->numFiles;
+
+    // success only if close() and has files and zip file exists in tar
+    return $this->zip->close() && !empty($num_files) && file_exists($zip_file);
+  }
+
+  // add_file_or_dir
+  private function add_file_or_dir($path, $root){
+    if(Path::is_exclude($path, is_dir($path)) || !is_readable($path)) return false; // file excluded, continue
+    $local_path = str_replace($root, '', $path); // local path relative to root
+    return is_dir($path) ? @$this->zip->addEmptyDir($local_path) : @$this->zip->addFile($path, $local_path);
+  }
+}
+
+// class Request / extract parameters for all actions
+class Request {
+
+  // vars
+  public $action;
+  public $params;
+  private $is_post;
+
+  // construct
+  public function __construct(){
+    $this->action = U::get('action');
+    $this->is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
+    // check that request method matches action, so we can't make POST requests from GET / this should be improved
+    if($this->is_post === in_array($this->action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $this->error('Invalid request method ' . $_SERVER['REQUEST_METHOD']);
+    $this->params = $this->get_request_data();
+    if(!is_array($this->params)) $this->error('Invalid parameters');
+  }
+
+  // get request data parameters
+  public function get_request_data(){
+    if(!$this->is_post) return $_GET;
+    if(isset($_POST) && !empty($_POST)) return $_POST;
+    $php_input = @json_decode(@trim(@file_get_contents('php://input')), true); // javascript fetch()
+    return $php_input ?: [];
+  }
+
+  // get specific string value parameter from data (dir, file path etc)
+  public function param($param){
+    if(!isset($this->params[$param])) return false;
+    if(!is_string($this->params[$param])) $this->error("Invalid $param parameter"); // must be string if exists
+    return trim($this->params[$param]); // trim it
+  }
+
+  // error response based on request type / 400 Bad Request default / 401, 403, 404, 500
+  public function error($err, $code = 400){
+    if($this->is_post) return Json::error($err);
+    U::error($err, $code);
+  }
+}
+
+// class Document / creates the main Files Gallery document response
+class Document {
+
+  // private Document class vars
+  private $start_path = ''; // start_path extracted and validated from query or $config['start_path']
+  private $absolute_start_path = false; // absolute path of start_path, for validation and dirs preload
+  private $dirs = []; // array of dirs to be preloaded, normally root and query or start_path (if not same as root)
+  private $menu_exists = false; // determines if menu exists from config and checks for dirs in root
+  private $menu_cache_hash = false; // assign a menu cache hash so menu cache can be validated on load
+  private $menu_cache_file = false; // assign direct access to menu json cache file when menu_cache_validate is disabled
+
+  // document construct tasks
+  public function __construct(){
+
+    // first we must get and validate start_path from ?query or config start_path
+    $this->get_start_path();
+
+    // always get root dir array (outputs as json, for javascript)
+    $this->dirs[''] = (new Dir(Config::$root))->get();
+
+    // get start path dir (if valid and not same as root, in case symlinked)
+    if($this->absolute_start_path && Path::realpath($this->absolute_start_path) !== Config::$root) $this->dirs[$this->start_path] = (new Dir($this->absolute_start_path))->get();
+
+    // prepare menu variables menu_exists, menu_cache_hash and menu_cache_file
+    $this->prepare_menu();
+
+    // output main Files Gallery document HTML
+    $this->HTML();
+  }
+
+  // get start_path from ?query or from config start_path (if set)
+  private function get_start_path(){
+
+    // first check if we have a query path
+    $query_path = $this->get_query_path();
+
+    // we have a query path (although it's not necessarily a valid dir)
+    if($query_path){
+
+      // assign query_path as start_path
+      $this->start_path = $query_path;
+
+      // check and return valid root path from query path
+      $this->absolute_start_path = Path::valid_rootpath($this->start_path, true);
+
+    // start path from config with error response invalid (path must exist, non-excluded and must be inside root)
+    } else if(Config::get('start_path')) {
+
+      // get realpath from config start_path
+      $this->absolute_start_path = Path::realpath(Config::get('start_path'));
+
+      // error if path does not exist or !is within root or is_exclude
+      if(!$this->absolute_start_path || !Path::is_within_path($this->absolute_start_path, Config::$root) || Path::is_exclude($this->absolute_start_path)) U::error('Invalid start_path ' . Config::get('start_path'));
+
+      // assign root-relative start_path to forward to javascript
+      $this->start_path = Path::relpath($this->absolute_start_path);
+    }
+  }
+
+  // parse query_string and get first ?parameter to be considered path
+  private function get_query_path(){
+    if(!Config::get('history') || empty($_SERVER['QUERY_STRING'])) return; // only if history and QUERY_STRING
+    $path = explode('&', $_SERVER['QUERY_STRING'])[0]; // get first parameter in QUERY_STRING for path
+    if(!$path || strpos($path, '=') !== false) return; // make sure path exists and is not assigned parameter=value
+    return trim(rawurldecode($path), '/'); // trime and decode
+  }
+
+  // prepare main menu variables
+  private function prepare_menu(){
+
+    // exit if !menu_enabled
+    if(!Config::get('menu_enabled')) return;
+
+    // get root dirs / used to decide if menu_exists, breadcrumbs and to generate shallow menu_cache_hash
+    $root_dirs = array_filter(glob(Config::$root . '/*', GLOB_ONLYDIR|GLOB_NOSORT), function($dir){
+      return !Path::is_exclude($dir, true, is_link($dir));
+    });
+
+    // menu exists only if root_dirs is not empty
+    $this->menu_exists = !empty($root_dirs);
+
+    // exit if !menu_exists
+    if(!$this->menu_exists) return;
+
+    // get menu_cache_hash used to validate first level shallow menu cache and when !menu_cache_validate
+    $this->get_menu_cache_hash($root_dirs);
+
+    // get JSON menu_cache_file to forward to Javascript if menu_cache_validate is disabled
+    $this->get_menu_cache_file();
+  }
+
+  // menu_cache_hash used to validate first level shallow menu cache (no validation required) and when !menu_cache_validate
+  private function get_menu_cache_hash($root_dirs){
+    $mtime_count = filemtime(Config::$root);
+    foreach ($root_dirs as $root_dir) $mtime_count += filemtime($root_dir);
+    // create hash based on various parameters that may affect the menu
+    $this->menu_cache_hash =  substr(md5(Config::$document_root . Config::$__dir__ . Config::$root), 0, 6) . '.' . substr(md5(Config::$version . Config::get('cache_key') . Config::get('menu_max_depth') . Config::get('menu_load_all') . (Config::get('menu_load_all') ? Config::get('files_exclude') . U::image_resize_cache_direct() : '') . Config::$has_login . Config::get('dirs_exclude') . Config::get('menu_sort')), 0, 6) . '.' . $mtime_count;
+  }
+
+  // get JSON menu_cache_file to forward to Javascript if menu_cache_validate is disabled
+  private function get_menu_cache_file(){
+
+    // exit if menu_cache_validate or !cache or !storage is_within_doc_root
+    if(Config::get('menu_cache_validate') || !Config::get('cache') || !Path::is_within_docroot(Config::$storagepath)) return;
+
+    // check if valid menu json cache file exists
+    $path = Config::$cachepath . '/menu/' . $this->menu_cache_hash . '.json';
+    $url_path = file_exists($path) ? Path::urlpath($path) : false;
+    if($url_path) $this->menu_cache_file = $url_path . '?' . filemtime($path);
+  }
+
+  // output main Files Gallery document HTML
+  private function HTML(){
+
+    // main document, output version, request time and memory
+    U::header('Version ' . Config::$version);
+
+    // main document html start
+    U::html_header($this->start_path ? U::basename($this->start_path) : './', 'menu-' . ($this->menu_exists ? 'enabled' : 'disabled sidebar-closed'));
+    ?>
+    <body class="body-loading">
+      <main id="main">
+        <nav id="topbar"<?php if(Config::get('topbar_sticky')) echo ' class="topbar-sticky"'; ?>>
+          <div id="topbar-top">
+            <div id="search-container"><input id="search" class="input" type="search" placeholder="search" size="1" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" disabled></div>
+            <div id="change-layout" class="dropdown"></div>
+            <div id="change-sort" class="dropdown"></div>
+          </div>
+          <div id="topbar-breadcrumbs"></div>
+          <div id="files-sortbar"></div>
+          <div class="topbar-select"></div>
+          <div id="topbar-info" class="info-hidden"></div>
+        </nav>
+        <div id="files-container"><div id="files" class="list files-<?php echo Config::get('layout'); ?>"></div></div>
+      </main>
+
+      <?php if($this->menu_exists) { ?>
+      <aside id="sidebar">
+        <button id="sidebar-toggle" type="button" class="button-icon"></button>
+        <div id="sidebar-inner">
+          <div id="sidebar-topbar"></div>
+          <div id="sidebar-menu"></div>
+        </div>
+      </aside>
+      <div id="sidebar-bg"></div>
+      <?php } ?>
+
+      <div id="contextmenu" class="dropdown-menu" tabindex="-1"></div>
+
+      <?php U::include('include/footer.html'); ?>
+
+<!-- javascript -->
+<script>
+const _c = <?php echo json_encode($this->get_javascript_config(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR); ?>;
+var CodeMirror = {};
+</script>
+<?php
+
+// load _files/js/custom.js if the file exists
+U::include('js/custom.js');
+
+// preload all Javascript assets
+foreach (array_filter([
+  'toastify-js@1.12.0/src/toastify.min.js',
+  'sweetalert2@11.7.28/dist/sweetalert2.min.js',
+  'animejs@3.2.1/lib/anime.min.js',
+  'yall-js@3.2.0/dist/yall.min.js',
+  'filesize@9.0.11/lib/filesize.min.js',
+  'screenfull@5.2.0/dist/screenfull.min.js',
+  'dayjs@1.11.9/dayjs.min.js',
+  'dayjs@1.11.9/plugin/localizedFormat.js',
+  'dayjs@1.11.9/plugin/relativeTime.js',
+  (in_array(Config::get('download_dir'), ['zip', 'files']) ? 'js-file-downloader@1.1.25/dist/js-file-downloader.min.js' : false),
+  'file-saver@2.0.5/dist/FileSaver.min.js',
+  'jszip@3.10.1/dist/jszip.min.js',
+  'codemirror@6.65.7/mode/meta.js',
+  'files.photo.gallery@' . Config::$version . '/js/files.js'
+]) as $key) echo '<script src="' . U::assetspath() . $key . '"></script>' . PHP_EOL;
+?></body></html><?php
+  // end HTML
+  }
+
+  // get Javascript config array / includes config properties and calculated values specifically for Javascript
+  private function get_javascript_config(){
+
+    // exclude config user settings for frontend (Javascript) when sensitive and/or not used in frontend
+    $exclude = [
+      'root',
+      'start_path',
+      'image_resize_cache',
+      'image_resize_quality',
+      'image_resize_function',
+      'image_resize_cache_direct',
+      'menu_load_all',
+      'cache_key',
+      'storage_path',
+      'files_exclude',
+      'dirs_exclude',
+      'username',
+      'password',
+      'allow_tasks',
+      'allow_symlinks',
+      'menu_recursive_symlinks',
+      'image_resize_sharpen',
+      'get_mime_type',
+      'license_key',
+      'video_thumbs',
+      'video_ffmpeg_path',
+      'folder_preview_default',
+      'image_resize_dimensions_allowed',
+      'download_dir_cache'
+    ];
+
+    // create config array without excluded items
+    $config = array_diff_key(Config::$config, array_flip($exclude));
+
+    // return Javascript config array, merged (some values overridden) with main $config
+    return array_replace($config, [
+      'script' => U::basename(__FILE__), // so JS knows where to post
+      'menu_exists' => $this->menu_exists, // so JS knows if menu exists
+      'menu_cache_hash' => $this->menu_cache_hash, // hash to post from JS when loading menu to check cache
+      'menu_cache_file' => $this->menu_cache_file, // direct url to JSON menu cache file if !menu_cache_validate
+      'start_path' => $this->start_path, // assign calculated start_path for first JS load
+      'query_path_invalid' => $this->start_path && !$this->absolute_start_path, // invalid query path forward to JS
+      'dirs' => $this->dirs, // preload dirs array for Javascript, will be served as json
+      'dirs_hash' => U::dirs_hash(), // dirs_hash to manage JS localStorage
+      'resize_image_types' => U::resize_image_types(), // let JS know what image types can be resized
+      'image_cache_hash' => $this->get_image_cache_hash(), // image cache hash to prevent expired cached/proxy images
+      'image_resize_dimensions_retina' => U::image_resize_dimensions_retina(), // calculated retina
+      'location_hash' => md5(Config::$root), // so JS can assume localStorage for relative paths like menu items open
+      'has_login' => Config::$has_login, // for logout interface
+      'version' => Config::$version, // forward version to JS
+      'index_html' => intval(U::get('index_html')), // popuplated when index.html is published by plugins/files.tasks.php
+      'server_exif' => function_exists('exif_read_data'), // so images can be oriented from exif orientation if detected
+      'image_resize_memory_limit' => $this->get_image_resize_memory_limit(), // so JS can calculate what images can be resized
+      'md5' => $this->get_md5('6c6963656e73655f6b6579'), // calculate md5 hash
+      'video_thumbs_enabled' => !!U::ffmpeg_path(), // so JS can attempt to load video preview images
+      'lang_custom' => $this->lang_custom(), // get custom language files _files/lang/*.json
+      'x3_path' => X3::urlpath(), // in case of used with X3, forward X3 url path for thumbnails
+      'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false, // forward USERX from server (if set)
+      'assets' => U::assetspath(), // calculated assets path (Javascript and CSS files from CDN or local)
+      'watermark_files' => $this->get_watermark_files(), // get uploaded watermark files (font, image) from _files/watermark/*
+      'ZipArchive_enabled' => class_exists('ZipArchive'), // required for zip and unzip functions on server
+      'upload_max_filesize' => $this->get_upload_max_filesize() // let the upload interface know upload_max_filesize
+    ]);
+  }
+
+  // get image cache hash from settings, used by JS when loading images, to prevent expired images from being served by cache/proxy
+  private function get_image_cache_hash(){
+    if(!Config::get('load_images')) return false; // exit
+    return substr(md5(Config::$document_root . Config::$root . Config::get('image_resize_function') . Config::get('image_resize_quality')), 0, 6);
+  }
+
+  // get image resize memory_limit so JS can calculate at what dimensions images can be resized
+  private function get_image_resize_memory_limit(){
+    if(!function_exists('ini_set')) return U::get_memory_limit_mb();
+    return (int) max(U::get_memory_limit_mb(), Config::get('image_resize_memory_limit'));
+  }
+
+  // calculate md5 hash from string
+  private function get_md5($str){
+    $str = Config::get(hex2bin($str));
+    return $str ? md5($str) : false;
+  }
+
+  // look for custom language files in _files/lang/*.json and forward to Javascript
+  private function lang_custom() {
+    if(!Config::$storagepath) return false;
+    $dir = Config::$storagepath . '/lang'; // custom languages path
+    $files = is_dir($dir) ? glob($dir . '/*.json') : false; // get language json files
+    if(empty($files)) return false; // exit
+    $langs = []; // start languages array
+    foreach ($files as $path) { // loop language files
+      $json = @file_get_contents($path);
+      $data = !empty($json) ? @json_decode($json, true) : false;
+      if(!empty($data)) $langs[strtok(U::basename($path), '.')] = $data; // assign language as array
+    }
+    return !empty($langs) ? $langs : false; // return array of languages with values
+  }
+
+  // search for watermark files (font, image) in _files/watermark/* for Uppy Compressor
+  private function get_watermark_files() {
+    if(!Config::get('allow_upload') || !Config::$storagepath || !Path::is_within_docroot(Config::$storagepath)) return false;
+    $dir = Config::$storagepath . '/watermark'; // _files/watermark
+    if(!file_exists($dir) || !is_readable($dir)) return false; // exit
+    $files = @glob($dir . '/*', GLOB_NOSORT); // get files in _files/watermark/*
+    return array_filter(array_map(function($file){
+      return Path::urlpath($file); // map results to relative url's loadable from Javascript
+    }, $files ?: [])); // default to empty array [] just in case there was some error
+  }
+
+  // get upload_max_filesize for uploader interface, limited by PHP upload_max_filesize, post_max_size and config upload_max_filesize
+  private function get_upload_max_filesize(){
+    if(!Config::get('allow_upload')) return 0; // just return 0 if upload is disabled
+    $arr = array_filter([U::ini_value_to_bytes('upload_max_filesize'), U::ini_value_to_bytes('post_max_size'), Config::get('upload_max_filesize')]); // don't include falsy values
+    return empty($arr) ? 0 : min($arr);
+  }
+}
 
 
-  // check login
-  } else if($action === 'check_login'){
-    json_success(true);
 
-  // check updates
+/* Files Gallery application logic starts here */
+
+// set UTF-8 locale so that basename() and other string functions work correctly with multi-byte strings.
+setlocale(LC_ALL, 'en_US.UTF-8');
+
+// start new Config()
+new Config();
+
+// start new Login()
+if(Config::$has_login) new Login();
+
+// process actions ?action=
+if(U::get('action')){
+
+  // start new request
+  $request = new Request();
+
+  // action shortcut
+  $action = $request->action;
+
+  // only allow valid actions
+  if(!in_array($action, ['files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
+
+  // check if actions with config allow_{$ACTION} (most write actions) are allowed
+  if(isset(Config::$config['allow_' . $action]) && !Config::get('allow_' . $action)) $request->error("$action not allowed");
+
+  // block all write actions in demo mode (that's what demo_mode option is for)
+  if(Config::get('demo_mode') && in_array($action, ['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit', 'zip', 'unzip', 'move', 'copy'])) $request->error("$action not allowed in demo mode");
+
+  // block all download actions [get_downloadables, download_dir_zip, download] if !allow_download
+  if(!Config::get('allow_download') && strpos($action, 'download') !== false) $request->error('Download not allowed');
+
+  // block all mass download actions [get_downloadables, download_dir_zip] if !allow_mass_download
+  if(!Config::get('allow_mass_download') && in_array($action, ['get_downloadables', 'download_dir_zip'])) $request->error('Mass download not allowed');
+
+  // prepare and validate $dir (full) from ?file parameter (if isset) for various actions
+  $dir = $request->param('dir');
+  if($dir !== false){ // explicitly check !== false because $dir could be valid '' empty (root)
+    $dir = Path::valid_rootpath($dir, true);
+    if(!$dir) $request->error('Invalid dir path');
+    // some actions require $dir to be writeable
+    if(in_array($action, ['copy', 'move', 'unzip', 'upload']) && !is_writable($dir)) $request->error('Dir is not writeable');
+  // actions that strictly require $dir (it's optional for some actions)
+  } else if(in_array($action, ['files', 'copy', 'move', 'upload', 'download_dir_zip', 'preview'])){
+    $request->error('Missing dir parameter');
+  }
+
+  // prepare and validate $file (full) from ?file parameter (if isset) for various actions
+  $file = $request->param('file');
+  if($file){
+    $file = Path::valid_rootpath($file);
+    if(!$file) $request->error('Invalid file path');
+  // actions that strictly require $file
+  } else if(in_array($action, ['load_text_file', 'file', 'download'])){
+    $request->error('Missing file parameter');
+  }
+
+  // validate items for Filemanager actions (all but upload)
+  if(isset($request->params['items'])){
+
+    // assign $items
+    $items = $request->params['items'];
+
+    // invalid $items if false, empty array or !array
+    if(empty($items) || !is_array($items)) $request->error('Invalid items parameter');
+
+    // assign [paths] / make sure each item.path exists, is valid, not excluded, and relative to Config::$root
+    $paths = array_values(array_filter(array_map(function($item){
+      return Path::valid_rootpath($item['path'], $item['is_dir']);
+    }, $items)));
+
+    // no valid item paths
+    if(empty($paths)) $request->error('Invalid item paths');
+
+    // shortcut because many actions only apply to a single item
+    $first_path = reset($paths);
+
+    // only actions new_file and new_file are allowed on root dir / other actions don't make sense for root
+    if($first_path === Config::$root && !in_array($action, ['new_file', 'new_folder'])) $request->error("Can't $action root directory");
+
+    // prepare $new_path for actions rename (required), new_file, new_folder, zip and duplicate
+    $new_path = false; // instantiate var because it's optional for all actions except rename
+    $name = $request->param('name'); // get ?name parameter
+    if($name !== false) {
+
+      // check if $name is allowed
+      if(!Filemanager::name_is_allowed($name)) $request->error(trim("Invalid name $name"));
+
+      // get parent dir / if new_folder or new_file, use selected item path, else dirname() of selected item path
+      $parent_dir = in_array($action, ['new_folder', 'new_file']) ? $first_path : dirname($first_path);
+      if(!is_dir($parent_dir)) $request->error('Not a directory'); // parent path must be dir
+      if(!is_writable($parent_dir)) $request->error('Dir is not writeable'); // dir must be writeable
+
+      // assign $new_path from $name
+      $new_path = $parent_dir . '/' . $name;
+      if(file_exists($new_path)) $request->error((is_dir($new_path) ? 'Dir' : 'File') . ' already exists');
+    }
+
+  // actions that require items parameter
+  } else if(in_array($action, ['copy', 'delete', 'duplicate', 'get_downloadables', 'move', 'new_file', 'new_folder', 'rename', 'text_edit', 'unzip', 'zip'])){
+    $request->error('Missing items parameter');
+  }
+
+  /* ACTIONS */
+
+  // get files from dir_target
+  if($action === 'files') {
+
+    // output dir array in json format (checks json cache first)
+    (new Dir($dir))->json();
+
+  // get dirs for menu
+  } else if($action=== 'dirs'){
+    new Dirs();
+
+  // read text file
+  } else if($action === 'load_text_file'){
+    if(filesize($file) > Config::get('code_max_load')) U::error('File size exceeds `code_max_load`', 400);
+    header('content-type: text/plain; charset=UTF-8');
+    if(@readfile($file) === false) U::error('failed to read file', 500);
+
+  // check Files Gallery updates JSON file from jsdelivr.com repository
   } else if($action === 'check_updates'){
     $json = @json_decode(@file_get_contents('https://data.jsdelivr.com/v1/package/npm/files.photo.gallery'), true);
-    $latest = !empty($json) && isset($json['versions'][0]) && version_compare($json['versions'][0], config::$version) > 0 ? $json['versions'][0] : false;
-    json_exit(array(
+    $latest = !empty($json) && isset($json['versions'][0]) && version_compare($json['versions'][0], Config::$version) > 0 ? $json['versions'][0] : false;
+    Json::exit([
       'success' => $latest,
-      'writeable' => $latest && is_writable(__FILE__) // only check writeable if $latest
-    ));
+      'writeable' => $latest && is_writable(__FILE__) // only check if __FILE__ is writeable if $latest
+    ]);
 
-  // do update
+  // attempt to update Files Gallery index.php to latest version via remote repository jsdelivr.com
   } else if($action === 'do_update'){
-    $version = post('version');
-    if(!$version || version_compare($version, config::$version) <= 0 || !is_writable(__FILE__)) json_error(); // requirements
+    // various requirements, which would normally be satisfied if accessed from the interface
+    $version = $request->param('version');
+    if(!$version || !Config::get('allow_check_updates') || version_compare($version, Config::$version) <= 0 || !is_writable(__FILE__)) $request->error('Error');
     $get = @file_get_contents('https://cdn.jsdelivr.net/npm/files.photo.gallery@' . $version . '/index.php');
-    if(empty($get) || strpos($get, '<?php') !== 0) json_error(); // basic validation
-    json_success(array('success' => @file_put_contents(__FILE__, $get)));
+    if(empty($get) || strpos($get, '<?php') !== 0 || !@file_put_contents(__FILE__, $get)) Json::error('failed to update');
+    Json::exit(['success' => true]);
 
-  // store license
-  } else if($action === 'license'){
-    $key = post('key') ? trim(post('key')) : false;
-    json_exit(array(
-      'success' => $key && config::$storage_config_realpath && config::save_config(array('license_key' => $key)),
+  // save input license key to user config
+  } else if($action === 'save_license'){
+    $key = $request->param('key');
+    Json::exit([
+      'success' => $key && Config::$storageconfigpath && Config::save(['license_key' => $key]),
       'md5' => $key ? md5($key) : false
-    ));
+    ]);
 
-  // invalid action
-	} else {
-    json_error('invalid action: ' . $action);
-  }
+  // delete items
+  } else if($action === 'delete') {
+    Filemanager::json(Filemanager::items('delete', $paths), 'failed to delete items');
 
-// GET
-} else /*if($_SERVER['REQUEST_METHOD'] === 'GET')*/{
+  // text_edit write to file
+  } else if($action === 'text_edit'){
+    if(!isset($request->params['text']) || !is_string($request->params['text'])) $request->error('Invalid text parameter');
+    if(!is_writeable($first_path)) $request->error('File is not writeable');
+    if(!is_file($first_path)) $request->error('Not a file');
+    if(@file_put_contents($first_path, $request->params['text']) === false) $request->error('failed to write to file', 500);
+    @touch(dirname($first_path)); // invalidate cache by updating parent dir mtime
+    Filemanager::json(true, 'failed to write to file');
 
-  // download_dir_zip / download files in directory as zip file
-  if(get('download_dir_zip')) {
-    new config();
+  // unzip zip file
+  } else if($action === 'unzip'){
+
+    // extract single zip file to $dir / if !$dir, it uses zip file parent
+    Filemanager::json((new Zipper(true))->extract($first_path, $dir), 'Failed to extract zip file');
+
+  // rename
+  } else if($action === 'rename'){
+
+    // new_path (derrved from $name) is required for rename action
+    if(!$new_path) $request->error('Missing name parameter');
+
+    // attempt to rename single file
+    Filemanager::json(@rename($first_path, $new_path), 'Rename failed');
+
+  // new_file
+  } else if($action === 'new_file'){
+
+    // attempt to create new file from $new_path or assign unique incremental filename "untitled-file.txt"
+    Filemanager::json(@touch($new_path?:Filemanager::get_unique_filename($first_path . '/untitled-file.txt')), 'Create new file failed');
+
+  // new_folder
+  } else if($action === 'new_folder'){
+
+    // attempt to create new directory from $new_path or assign unique incremental folder name from "untitled-folder"
+    Filemanager::json(@mkdir($new_path?:Filemanager::get_unique_filename($first_path . '/untitled-folder')), 'Create new folder failed');
+
+  // zip items / $new_path is optional, will create auto-named zip in current dir if empty
+  } else if($action === 'zip') {
+    Filemanager::json((new Zipper(true))->create($paths, $new_path), 'Failed to zip items');
+
+  // copy or move use identical pre-process
+  } else if(in_array($action, ['copy', 'move'])) {
+
+    // don't allow copy/move items over themselves copy/move dirs into themselves (may cause infinite recursion)
+    // this is already blocked in copy function, but better detect up front for items array and respond appropriately
+    $valid_copy_move_paths = array_filter($paths, function($path) use ($dir){
+      return !Path::is_within_path($dir . '/' . U::basename($path), $path);
+    });
+
+    // can't copy/move into self error
+    if(empty($valid_copy_move_paths)) $request->error("can't $action into self");
+
+    // response
+    Filemanager::json(Filemanager::items($action, $valid_copy_move_paths, $dir), $action . ' failed');
+
+  // duplicate / really just a shortcut for copy into same dir
+  } else if($action === 'duplicate') {
+
+    // duplicates a single item with provided $name (pre-assigned to $new_path)
+    if($new_path) Filemanager::json(Filemanager::copy($first_path, $new_path), 'duplicate failed');
+
+    // duplicates an array of files and dirs, automatically incrementing file names
+    Filemanager::json(Filemanager::items('duplicate', $paths), 'duplicate failed');
+
+  // get_downloadables returns an array of downloadable files recursively from an array of directories
+  } else if($action === 'get_downloadables'){
+
+    // return an array of downloadable files from within an array of $paths
+    Json::exit(Filemanager::get_downloadables($paths));
+
+  // upload
+  } else if($action === 'upload'){
+
+    // get $_FILES['file'] array
+    $upload = isset($_FILES) && isset($_FILES['file']) && is_array($_FILES['file']) ? $_FILES['file'] : false;
+
+    // invalid $_FILES['file']
+    if(empty($upload) || !isset($upload['error']) || is_array($upload['error'])) $request->error('Invalid $_FILES[]');
+
+    // PHP meaningful file upload errors / https://www.php.net/manual/en/features.file-upload.errors.php
+    if($upload['error'] !== 0) {
+      $upload_errors = [
+        1 => 'Uploaded file exceeds upload_max_filesize directive in php.ini',
+        2 => 'Uploaded file exceeds MAX_FILE_SIZE directive specified in the HTML form',
+        3 => 'The uploaded file was only partially uploaded',
+        4 => 'No file was uploaded',
+        6 => 'Missing a temporary folder',
+        7 => 'Failed to write file to disk.',
+        8 => 'A PHP extension stopped the file upload.'
+      ];
+      $request->error(isset($upload_errors[$upload['error']]) ? $upload_errors[$upload['error']] : 'unknown error');
+    }
+
+    // invalid $upload['size']
+    if(!isset($upload['size']) || empty($upload['size'])) $request->error('Invalid file size');
+
+    // $upload['size'] must not exceed $config['upload_max_filesize']
+    if(Config::get('upload_max_filesize') && $upload['size'] > Config::get('upload_max_filesize')) $request->error('File size [' . $upload['size'] . '] exceeds upload_max_filesize option [' . Config::get('upload_max_filesize') . ']');
+
+    // get filename
+    $filename = $upload['name'];
+
+    // for security reasons, slashes are never allowed in file names
+    if(strpos($filename, '/') !== false || strpos($filename, '\\') !== false) $request->error('Illegal \slash/ in filename ' . $filename);
+
+    // get allowed_file_types / 'image/*, .pdf, .mp4'
+    $allowed_file_types = Config::get('upload_allowed_file_types') ? array_filter(array_map('trim', explode(',', Config::get('upload_allowed_file_types')))) : false;
+
+    // check allowed_file_types
+    if(!empty($allowed_file_types)){
+      $mime = U::mime($upload['tmp_name']) ?: $upload['type']; // mime from PHP or upload[type]
+      $ext = U::extension($filename, true, true); // get extension lowercase starting with .dot
+      $is_valid = false; // default !is_valid until validated
+      // check if extension match || wildcard match mime type image/*
+      foreach ($allowed_file_types as $allowed_file_type) if($ext === ('.' . ltrim($allowed_file_type, '.')) || fnmatch($allowed_file_type, $mime)) {
+        $is_valid = true;
+        break;
+      }
+
+      // invalid file type
+      if(!$is_valid) $request->error("Invalid file type $filename");
+
+      // for additional security, check if uploaded image is an actual image with exif_imagetype() function
+      if(function_exists('exif_imagetype') && in_array($ext, ['.gif', '.jpeg', '.jpg', '.png', '.swf', '.psd', '.bmp', '.tif', '.tiff', 'webp', 'avif']) && !@exif_imagetype($upload['tmp_name'])) $request->error("Invalid image type $filename");
+    }
+
+    // create subdirs when relativePath exists (keeps folder structure from drag and drop)
+    $relative_path = $request->param('relativePath');
+    if(!empty($relative_path) && $relative_path != 'null' && $relative_path != $filename && strpos($relative_path, '/') !== false){
+      $new_dir = dirname("$dir/$relative_path");
+      if(file_exists($new_dir) || @mkdir($new_dir, 0777, true)) $dir = $new_dir;
+    }
+
+    // assign move to path
+    $move_path = "$dir/$filename";
+
+    // fail if config upload_exists === false
+    if(Config::get('upload_exists') === 'fail' && file_exists($move_path)) $request->error("$filename already exists");
+
+    // increment file name if file name already exists
+    if(Config::get('upload_exists') === 'increment') $move_path = Filemanager::get_unique_filename($move_path);
+
+    // all is well! attempt to move_uploaded_file() / JSON RESPONSE
+    Filemanager::json([
+      'success' => @move_uploaded_file($upload['tmp_name'], $move_path),
+      'filename' => $filename, // return filename in case it was incremented or renamed
+      'url' => Path::urlpath($move_path) // for usage with showLinkToFileUploadResult
+    ], 'failed to move_uploaded_file()');
+
+  // $_GET download_dir_zip / download files in directory as zip file
+  } else if($action === 'download_dir_zip'){
 
     // check download_dir enabled
-    if(config::$config['download_dir'] !== 'zip') error('<strong>download_dir</strong> Zip disabled.', 403);
-
-    // valid dir
-    $dir = valid_root_path(get('download_dir_zip'), true);
-    if(!$dir) error('Invalid download path <strong>' . get('download_dir_zip') . '</strong>', 404);
-    $dir = real_path($dir); // in case of symlink path
+    if(Config::get('download_dir') !== 'zip') $request->error('download_dir zip disabled');
 
     // create zip cache directly in dir (recommended, so that dir can be renamed while zip cache remains)
-    if(!config::$storage_path || config::$config['download_dir_cache'] === 'dir') {
-      if(!is_writable($dir)) error('Dir ' . _basename($dir) . ' is not writeable.', 500);
+    if(!Config::$storagepath || Config::get('download_dir_cache') === 'dir') {
+      if(!is_writable($dir)) $request->error('Dir is not writeable', 500);
       $zip_file_name = '_files.zip';
       $zip_file = $dir . '/' . $zip_file_name;
 
     // create zip file in storage _files/zip/$dirname.$md5.zip /
     } else {
-      mkdir_or_error(config::$storage_path . '/zip');
-      $zip_file_name = _basename($dir) . '.' . substr(md5($dir), 0, 6) . '.zip';
-      $zip_file = config::$storage_path . '/zip/' . $zip_file_name;
+      U::mkdir(Config::$storagepath . '/zip');
+      $zip_file_name = U::basename($dir) . '.' . substr(md5($dir), 0, 6) . '.zip';
+      $zip_file = Config::$storagepath . '/zip/' . $zip_file_name;
     }
 
     // cached / download_dir_cache && file_exists() && zip is not older than dir time
-    $cached = !empty(config::$config['download_dir_cache']) && file_exists($zip_file) && filemtime($zip_file) >= filemtime($dir);
+    $cached = Config::get('download_dir_cache') && file_exists($zip_file) && filemtime($zip_file) >= filemtime($dir);
 
     // create zip if !cached
-    if(!$cached){
-
-      // use shell zip command instead / probably faster and more robust than PHP / if use, comment out PHP ZipArchive method starting below
-      // exec('zip ' . $zip_file . ' ' . $dir . '/*.* -j -x _files*', $out, $res);
-
-      // check that ZipArchive class exists
-      if(!class_exists('ZipArchive')) error('Missing PHP ZipArchive class.', 500);
-
-      // glob files / must be readable / is_file / !symlink / !is_exclude
-      $files = array_filter(glob(glob_escape($dir) . '/*', GLOB_NOSORT), function($file){
-        return is_readable($file) && is_file($file) && !is_link($file) && !is_exclude($file, false);
-      });
-
-      // !no files available to zip
-      if(empty($files)) error('No files to zip!', 400);
-
-      // new ZipArchive
-      $zip = new ZipArchive();
-
-      // create new $zip_file
-      if($zip->open($zip_file, ZipArchive::CREATE | ZIPARCHIVE::OVERWRITE) !== true) error('Failed to create ZIP file ' . $zip_file_name . '.', 500);
-
-      // add files to zip / flatten with _basename()
-      foreach($files as $file) $zip->addFile($file, _basename($file));
-
-      // no files added (for some reason)
-      if(!$zip->numFiles) error('Could not add any files to ' . $zip_file_name . '.', 500);
-
-      // close zip
-      $zip->close();
-
-      // make sure created zip file exists / just in case
-      if(!file_exists($zip_file)) error('Zip file ' . $zip_file_name . ' does not exist.', 500);
-    }
-
-    // redirect instead of readfile() / might be useful if readfile() fails and/or for caching and performance
-    /*$zip_url = get_url_path($zip_file);
-    if($zip_url){
-      header('Location:' . $zip_url . '?' . filemtime($dir), true, 302);
-      exit;
-    }*/
-
-    // output headers
-    if(config::$has_login) {
-      header('cache-control: must-revalidate, post-check=0, pre-check=0');
-      header('cache-control: public');
-      header('expires: 0');
-      header('pragma: public');
-    } else {
-      set_cache_headers();
-    }
-    header('content-description: File Transfer');
-    header('content-disposition: attachment; filename="' . addslashes(_basename($dir)) . '.zip"');
-    $content_length = filesize($zip_file);
-    header('content-length: ' . $content_length);
-    header('content-transfer-encoding: binary');
-    header('content-type: application/zip');
-    header('files-msg: [' . $zip_file_name . '][' . ($cached ? 'cached' : 'created') . ']');
+    if(!$cached && !(new Zipper())->create([$dir], $zip_file)) $request->error('Failed to create ZIP file', 500);
 
     // ignore user abort so we can delete file also on download cancel
-    if(empty(config::$config['download_dir_cache'])) @ignore_user_abort(true);
+    if(!Config::get('download_dir_cache')) @ignore_user_abort(true);
 
-    // clear output buffer for large files
-    while (ob_get_level()) ob_end_clean();
+    // output zip file as download using correct headers and readfile()
+    U::download($zip_file, $zip_file_name . ($cached ? ' cached' : ' created'), 'application/zip', U::basename($dir) . '.zip');
 
-    // output zip readfile()
-    if(!readfile($zip_file)) error('Failed to readfile(' . $zip_file_name . ').', 500);
+    // delete temporary zip file if cache disabled
+    if(!Config::get('download_dir_cache')) @unlink($zip_file);
 
-    // delete temp zip file if cache disable
-    if(empty(config::$config['download_dir_cache'])) @unlink($zip_file);
+  // $_GET folder preview from images/video inside dir
+  } else if($action === 'preview'){
 
+    // allow folder preview image only if folder_preview_image, load_images, image_resize_enabled and cache
+    foreach (['folder_preview_image', 'load_images', 'image_resize_enabled', 'image_resize_cache'] as $key) if(!Config::get($key)) $request->error("Config option $key disabled", 403);
 
-  // folder preview image
-  } else if(get('preview')){
-    new config();
-
-    // allow only if only if folder_preview_image + load_images + image_resize_enabled
-    foreach (['folder_preview_image', 'load_images', 'image_resize_enabled'] as $key) if(!config::$config[$key]) error('[' .$key . '] disabled.', 400);
-
-    // get real path and validate
-    $path = valid_root_path(get('preview'), true); // make sure is valid dir
-    if(!$path) error('Invalid directory.', 404);
-
-    // 1. first check for default '_filespreview.jpg' inside dir
-    $default = config::$config['folder_preview_default'] ? $path . '/' . config::$config['folder_preview_default'] : false;
+    // 1. first check if default folder_preview_default '_filespreview.jpg' exists in dir / must be resized
+    $default = Config::get('folder_preview_default') ? $dir . '/' . Config::get('folder_preview_default') : false;
     if($default && file_exists($default)) {
-      header('files-preview: folder_preview_default found [' . config::$config['folder_preview_default'] . ']');
-      resize_image($default, config::$config['image_resize_dimensions']);
+      U::message(Config::get('folder_preview_default'));
+      new ResizeImage($default, Config::get('image_resize_dimensions')); // default resize for small preview images
     }
 
-    // 2. check preview cache
-    $cache = config::$cache_path . '/images/preview.' . substr(md5($path), 0, 6) . '.jpg';
+    // 2. assign cache path
+    $cache = Config::$cachepath . '/images/preview.' . substr(md5($dir), 0, 6) . '.jpg';
 
-    // preview cache file exists / _files/cache/images/preview.HASH.jpg
+    // check if preview cache file exists / _files/cache/images/preview.HASH.jpg
     if(file_exists($cache)) {
 
       // make sure cache file is valid (must be newer than dir updated time)
-      if(filemtime($cache) >= filemtime($path)) read_file($cache, null, 'preview image served from cache', null, true);
+      if(filemtime($cache) >= filemtime($dir)) U::readfile($cache, 'image/jpeg', 'Preview image from cache', true);
 
       // delete expired cache file if is older than dir updated time [silent]
       @unlink($cache);
     }
 
-    /* // now combined with new function that checks for both video and images
-    // 3. glob images / GLOB_BRACE may fail on some non GNU systems, like Solaris.
-    $images = @glob(glob_escape($path) . '/*.{jpg,JPG,jpeg,JPEG,png,PNG,gif,GIF}', GLOB_NOSORT|GLOB_BRACE);
-
-    // loop images to locate first match that is not excluded
-    if(!empty($images)) foreach ($images as $image) {
-      if(is_exclude($image, false) || !is_readable($image)) continue; // skip if is_exclude or !readable
-      header('files-preview: glob() found [' . _basename($image) . ']');
-      resize_image($image, config::$config['image_resize_dimensions'], $cache); // + clone into $cache
-      break; exit; // just in case, although resize_image will exit
-    }
-    */
-
-    // 3. glob files to look for images or video
-    $files = @glob(glob_escape($path) . '/*', GLOB_NOSORT);
+    // 3. glob files to look for images and video
+    $files = U::glob("$dir/*");
 
     // files found
     if(!empty($files)) {
 
       // prepare arrays of supported image and video formats
-      $image_types = resize_image_types();
-      $video_types = get_ffmpeg_path() ? ['mp4', 'm4v', 'm4p', 'webm', 'ogv', 'mkv', 'avi', 'mov', 'wmv'] : [];
+      $image_types = U::resize_image_types();
+      $video_types = U::ffmpeg_path() ? ['mp4', 'm4v', 'm4p', 'webm', 'ogv', 'mkv', 'avi', 'mov', 'wmv'] : [];
 
       // loop files to locate first match
       foreach ($files as $file) {
 
         // get extension lowercase
-        $ext = strtolower(substr(strrchr($file, '.'), 1));
+        $ext = U::extension($file, true);
         if(empty($ext)) continue; // skip if no extension
 
         // match image or video, return target resize_dimensions if image
-        $match = in_array($ext, $image_types) ? config::$config['image_resize_dimensions'] : (in_array($ext, $video_types) ? 'video' : false);
+        $match = in_array($ext, $image_types) ? Config::get('image_resize_dimensions') : (in_array($ext, $video_types) ? 'video' : false);
         if(!$match) continue; // skip if extension not supported
 
         // skip if is_exclude or !readable
-        if(is_exclude($file, false) || !is_readable($file)) continue;
+        if(Path::is_exclude($file, false) || !is_readable($file)) continue;
 
-        // get preview and clone into preview $cache for faster access on next request for dir
-        get_file($file, $match, $cache);
-        break; exit; // just in case, although get_file() will exit
+        // get preview image ro video, and clone into preview $cache for faster access on next request for dir
+        new FileResponse($file, $match, $cache);
+        break; exit; // just in case, although new FileResponse() will exit on U::readfile()
       }
     }
 
     // 4. nothing found (no images in dir)
     // create empty 1px in $cache, and output (so next check knows dir is empty or has no images, unless updated)
-    if(imagejpeg(imagecreate(1, 1), $cache)) read_file($cache, 'image/jpeg', '1px placeholder image created and cached', null, true);
+    if(imagejpeg(imagecreate(1, 1), $cache)) U::readfile($cache, 'image/jpeg', '1px placeholder image created and cached', true);
 
+  // $_GET file / resize parameter for preview images, else will proxy any file
+  } else if($action === 'file'){
+    new FileResponse($file, U::get('resize'));
 
-	// file/image
-	} else if(isset($_GET['file'])){
-    new config();
-    get_file(valid_root_path(get('file')), get('resize'));
+  // $_GET force download single file by PHP
+  } else if($action === 'download'){
 
-	// download
-	} else if(isset($_GET['download'])){
-    new config();
+    // output file as download using correct headers and readfile()
+    U::download($file, 'Download ' . U::basename($file), U::mime($file) ?: 'application/octet-stream', U::basename($file));
 
-		// valid download
-    $download = valid_root_path(get('download'));
-    if(!$download) error('Invalid download path <strong>' . get('download') . '</strong>', 404);
-    $download = real_path($download); // in case of symlink path
+  // $_GET tasks plugin (for pre-caching or clearing cache, not official plugin yet ...)
+  } else if($action === 'tasks'){
+    if(!U::include('plugins/files.tasks.php')) $request->error('Can\'t find tasks plugin', 404);
 
-	  // required for some browsers
-	  if(@ini_get('zlib.output_compression')) @ini_set('zlib.output_compression', 'Off');
+  // output PHP and server features by url ?action=tests / for diagnostics only
+  } else if($action === 'tests'){
+    new Tests();
 
-	  // headers
-	  header('Content-Description: File Transfer');
-	  header('Content-Type: application/octet-stream');
-	  header('Content-Disposition: attachment; filename="' . _basename($download) . '"');
-	  header('Content-Transfer-Encoding: binary');
-	  header('Expires: 0');
-	  header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-	  header('Pragma: public');
-	  header('Content-Length: ' . filesize($download));
-	  while (ob_get_level()) ob_end_clean();
-	  readfile($download);
-
-  // tasks plugin
-  } else if(get('task')){
-
-    // attempt to load tasks plugin
-    new config(true);
-    get_include('plugins/files.tasks.php') || error('Can\'t find tasks plugin.', 404);
-    exit;
-
-// main document
-	} else {
-
-// new config, with tests
-new config(true);
-
-// validate exclude regex
-if(config::$config['files_exclude'] && @preg_match(config::$config['files_exclude'], '') === false) error('Invalid files_exclude regex <strong>' . config::$config['files_exclude'] . '</strong>');
-if(config::$config['dirs_exclude'] && @preg_match(config::$config['dirs_exclude'], '') === false) error('Invalid dirs_exclude regex <strong>' . config::$config['dirs_exclude'] . '</strong>');
-
-// start path
-$start_path = config::$config['start_path'];
-if($start_path){
-  $real_start_path = real_path($start_path);
-  if(!$real_start_path) error('start_path ' . $start_path . ' does not exist.');
-  if(!is_within_root($real_start_path)) error('start_path ' . $start_path . ' is not within root dir ' . config::$config['root']);
-  $start_path = root_relative($real_start_path);
-}
-
-// always get root_dirs for breadcrumbs and menu_cache (if menu_enabled)
-$root_dirs = get_root_dirs();
-
-// menu_exists if menu_enabled && $root_dirs
-$menu_exists = config::$config['menu_enabled'] && !empty($root_dirs) ? true : false;
-
-// get menu cache hash
-$menu_cache_hash = false;
-$menu_cache_file = false;
-if($menu_exists){
-  $menu_cache_hash = get_menu_cache_hash($root_dirs);
-  // menu cache file (if cache, !menu_cache_validate, exists and is within doc root)
-  if(config::$storage_is_within_doc_root && config::$config['cache'] && !config::$config['menu_cache_validate']) {
-    $menu_cache_path = config::$cache_path . '/menu/' . $menu_cache_hash . '.json';
-    $menu_cache_file = file_exists($menu_cache_path) ? get_url_path($menu_cache_path) : false;
-    if($menu_cache_file) $menu_cache_file .= '?' . filemtime($menu_cache_path);
+  // invalid action 400
+  } else {
+    $request->error("Invalid action $action");
   }
+
+// output main Files Gallery document html if !action
+} else {
+  new Document();
 }
 
-// init path
-$query = config::$config['history'] && isset($_SERVER['QUERY_STRING']) && !empty($_SERVER['QUERY_STRING']) ? explode('&', $_SERVER['QUERY_STRING']) : false;
-$query_path = $query && strpos($query[0], '=') === false ? rtrim(rawurldecode($query[0]), '/') : false;
-$query_path_valid = $query_path ? valid_root_path($query_path, true) : false;
-$init_path = $query_path ?: $start_path ?: '';
-
-// init dirs, with files if cache
-function get_dir_init($dir){
-  $cache = get_dir_cache_path(real_path($dir));
-  if($cache && file_exists($cache)) return json_decode(file_get_contents($cache), true);
-  return get_dir($dir);
-}
-
-// get dirs for root and start path
-$dirs = array('' => get_dir_init(config::$root));
-if($query_path){
-  if($query_path_valid) $dirs[$query_path] = get_dir_init($query_path_valid);
-} else if($start_path){
-  $dirs[$start_path] = get_dir_init($real_start_path);
-}
-
-// image resize memory limit / for Javascript detection
-$image_resize_memory_limit = config::$config['image_resize_enabled'] && config::$config['image_resize_memory_limit'] && function_exists('ini_get') ? (int) @ini_get('memory_limit') : 0;
-if($image_resize_memory_limit && function_exists('ini_set')) $image_resize_memory_limit = max($image_resize_memory_limit, config::$config['image_resize_memory_limit']);
-
-// wtc
-$wtc = config::$config[base64_decode('bGljZW5zZV9rZXk')];
-
-// look for custom language files _files/lang/*.json
-function lang_custom() {
-  $dir = config::$storage_path ? config::$storage_path . '/lang' : false;
-  $files = $dir && file_exists($dir) ? glob($dir . '/*.json') : false;
-  if(empty($files)) return false;
-  $langs = array();
-  foreach ($files as $path) {
-    $json = @file_get_contents($path);
-    $data = !empty($json) ? @json_decode($json, true) : false;
-    if(!empty($data)) $langs[strtok(_basename($path), '.')] = $data;
-  }
-  return !empty($langs) ? $langs : false;
-}
-
-// get watermark files (font, image) from _files/watermark/*
-function get_watermark_files() {
-  if(!config::$config['allow_upload'] || !config::$storage_path) return false;
-  $path = config::$config['storage_path'] . '/watermark'; // use relative path
-  if(!file_exists($path) || !is_readable($path)) return false;
-  return @glob($path . '/*', GLOB_NOSORT); // grab all files (fonts, images) to load into upload Compressor
-}
-
-// exclude some user settings from frontend
-$exclude = array_diff_key(config::$config, array_flip(array('root', 'start_path', 'image_resize_cache', 'image_resize_quality', 'image_resize_function', 'image_resize_cache_direct', 'menu_sort', 'menu_load_all', 'cache_key', 'storage_path', 'files_exclude', 'dirs_exclude', 'username', 'password', 'allow_tasks', 'allow_symlinks', 'menu_recursive_symlinks', 'image_resize_sharpen', 'get_mime_type', 'license_key', 'video_thumbs', 'video_ffmpeg_path', 'folder_preview_default', 'image_resize_dimensions_allowed', 'download_dir_cache')));
-
-// json config
-$json_config = array_replace($exclude, array(
-  'script' => _basename(__FILE__),
-  'menu_exists' => $menu_exists,
-  'menu_cache_hash' => $menu_cache_hash,
-  'menu_cache_file' => $menu_cache_file,
-  'query_path' => $query_path,
-  'query_path_valid' => $query_path_valid ? true : false,
-  'init_path' => $init_path,
-  'dirs' => $dirs,
-  'dirs_hash' => config::$dirs_hash,
-  'resize_image_types' => resize_image_types(),
-  'image_cache_hash' => config::$config['load_images'] ? substr(md5(config::$doc_root . config::$root . config::$config['image_resize_function'] . config::$config['image_resize_quality']), 0, 6) : false,
-  'image_resize_dimensions_retina' => config::$image_resize_dimensions_retina,
-  'location_hash' => md5(config::$root),
-  'has_login' => config::$has_login,
-  'version' => config::$version,
-  'index_html' => intval(get('index_html')),
-  'server_exif' => function_exists('exif_read_data'),
-  'image_resize_memory_limit' => $image_resize_memory_limit,
-  'qrx' => $wtc && is_string($wtc) ? substr(md5($wtc), 0, strlen($wtc)) : false,
-  'video_thumbs_enabled' => !!get_ffmpeg_path(),
-  'lang_custom' => lang_custom(),
-  'x3_path' => config::$x3_path ? get_url_path(config::$x3_path) : false,
-  'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false,
-  'assets' => config::$assets, // computed assets path
-  'watermark_files' => get_watermark_files() // get upload watermark files (font, image) from _files/watermark/*
-));
-
-// calculate bytes from PHP ini settings
-function php_directive_value_to_bytes($directive) {
-  $val = function_exists('ini_get') ? @ini_get($directive) : false;
-  if (empty($val) || !is_string($val)) return 0;
-  preg_match('/^(?<value>\d+)(?<option>[K|M|G]*)$/i', $val, $matches);
-  if(!isset($matches['value']) || !isset($matches['option'])) return 0;
-  $value = (int) $matches['value'];
-  $option = strtoupper($matches['option']);
-  if ($option === 'K') {
-    $value *= 1024;
-  } elseif ($option === 'M') {
-    $value *= 1024 * 1024;
-  } elseif ($option === 'G') {
-    $value *= 1024 * 1024 * 1024;
-  }
-  return $value;
-}
-
-// upload options
-if(config::$config['allow_upload']) {
-  if(function_exists('ini_get') && !@ini_get('file_uploads')) error('PHP file_uploads disabled on this server.', 500);
-  // get max_filesize from all potential limitations (must be > 0)
-  $max_sizes = array_filter(array(php_directive_value_to_bytes('upload_max_filesize'), php_directive_value_to_bytes('post_max_size'), config::$config['upload_max_filesize']));
-  // get min val from max_sizes[] || no limit
-  $json_config['upload_max_filesize'] = !empty($max_sizes) ? min($max_sizes) : 0;
-}
-
-// memory and time
-header('files-msg: [' . header_memory_time() . ']');
-
-// main document html start
-get_header($init_path ? _basename($init_path) : '/', 'menu-' . ($menu_exists ? 'enabled' : 'disabled sidebar-closed')); ?>
-  <body class="body-loading">
-    <main id="main">
-      <nav id="topbar"<?php if(!empty(config::$config['topbar_sticky'])) echo ' class="topbar-sticky"'; ?>>
-        <div id="topbar-top">
-          <div id="search-container"><input id="search" class="input" type="search" placeholder="search" size="1" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" disabled></div>
-          <div id="change-layout" class="dropdown"></div>
-          <div id="change-sort" class="dropdown"></div>
-        </div>
-        <div id="topbar-breadcrumbs">
-          <div class="breadcrumbs-info"></div>
-          <div id="breadcrumbs"></div>
-        </div>
-        <div id="files-sortbar"></div>
-        <div id="topbar-info" class="info-hidden"></div>
-      </nav>
-      <!-- files list container -->
-      <div id="files-container"><div id="files" class="list files-<?php echo config::$config['layout']; ?>"></div></div>
-    </main>
-<?php if($menu_exists) { ?>
-    <aside id="sidebar">
-      <button id="sidebar-toggle" type="button" class="button-icon"></button>
-      <div id="sidebar-inner">
-        <div id="sidebar-topbar"></div>
-        <div id="sidebar-menu"></div>
-      </div>
-    </aside>
-    <div id="sidebar-bg"></div>
-<?php } ?>
-
-    <!-- context menu -->
-    <div id="contextmenu" class="dropdown-menu" tabindex="-1"></div>
-
-    <!-- custom footer html -->
-    <?php get_include('include/footer.html'); ?>
-
-    <!-- Javascript -->
-    <script>
-const _c = <?php echo json_encode($json_config, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_PARTIAL_OUTPUT_ON_ERROR); ?>;
-var CodeMirror = {};
-    </script>
-    <?php
-
-    // load _files/js/custom.js if exists
-    get_include('js/custom.js');
-
-    // load all Javascript assets
-    foreach (array_filter([
-      'toastify-js@1.12.0/src/toastify.min.js',
-      'sweetalert2@11.7.20/dist/sweetalert2.min.js',
-      'animejs@3.2.1/lib/anime.min.js',
-      '@exeba/list.js@2.3.1/dist/list.min.js',
-      'yall-js@3.2.0/dist/yall.min.js',
-      'filesize@9.0.11/lib/filesize.min.js',
-      'screenfull@5.2.0/dist/screenfull.min.js',
-      'dayjs@1.11.9/dayjs.min.js',
-      'dayjs@1.11.9/plugin/localizedFormat.js',
-      'dayjs@1.11.9/plugin/relativeTime.js',
-      (in_array(config::$config['download_dir'], ['zip', 'files']) ? 'js-file-downloader@1.1.25/dist/js-file-downloader.min.js' : false),
-      (config::$config['download_dir'] === 'browser' ? 'jszip@3.10.1/dist/jszip.min.js' : false),
-      (config::$config['download_dir'] === 'browser' ? 'file-saver@2.0.5/dist/FileSaver.min.js' : false),
-      'codemirror@5.65.14/mode/meta.js',
-      'files.photo.gallery@' . config::$version . '/js/files.js'
-    ]) as $key) echo '<script src="' . config::$assets . $key . '"></script>';
-    ?>
-  </body>
-</html>
-<?php }}
-// htmlend
-?>
+// THE END!
