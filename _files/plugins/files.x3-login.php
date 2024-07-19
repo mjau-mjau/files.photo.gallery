@@ -67,7 +67,6 @@ class X3_login {
 			'mass_copy_links'
 		] as $key) $this->set("allow_$key", true);
 
-
 		// exclude .json files as we don't want these visible
 		$this->set('files_exclude', '/\.json$/i');
 

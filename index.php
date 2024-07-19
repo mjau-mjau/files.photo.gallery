@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.9.0
+/* Files Gallery 0.9.1
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -118,7 +118,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.9.0';   // Files Gallery version
+  public static $version = '0.9.1';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -2290,14 +2290,14 @@ U::include('js/custom.js');
 // preload all Javascript assets
 foreach (array_filter([
   'toastify-js@1.12.0/src/toastify.min.js',
-  'sweetalert2@11.7.28/dist/sweetalert2.min.js',
-  'animejs@3.2.1/lib/anime.min.js',
+  'sweetalert2@11.12.3/dist/sweetalert2.min.js',
+  'animejs@3.2.2/lib/anime.min.js',
   'yall-js@3.2.0/dist/yall.min.js',
   'filesize@9.0.11/lib/filesize.min.js',
   'screenfull@5.2.0/dist/screenfull.min.js',
-  'dayjs@1.11.9/dayjs.min.js',
-  'dayjs@1.11.9/plugin/localizedFormat.js',
-  'dayjs@1.11.9/plugin/relativeTime.js',
+  'dayjs@1.11.12/dayjs.min.js',
+  'dayjs@1.11.12/plugin/localizedFormat.js',
+  'dayjs@1.11.12/plugin/relativeTime.js',
   (in_array(Config::get('download_dir'), ['zip', 'files']) ? 'js-file-downloader@1.1.25/dist/js-file-downloader.min.js' : false),
   'file-saver@2.0.5/dist/FileSaver.min.js',
   'jszip@3.10.1/dist/jszip.min.js',
