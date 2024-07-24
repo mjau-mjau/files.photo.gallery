@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.9.5
+/* Files Gallery 0.9.6
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -118,7 +118,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.9.5';   // Files Gallery version
+  public static $version = '0.9.6';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -1215,7 +1215,7 @@ class ResizeImage {
   // rotate resized image according to exif image orientation (no way we deal with this in browser)
   private function exif_orientation(){
     // attempt to get image exif array
-    $exif = Exif::exif($this->path);
+    $exif = Exif::exif_data($this->path);
     // exit if there is no exif orientation value
     if(!$exif || !isset($exif['Orientation'])) return;
     // assign $orientation
@@ -1763,7 +1763,7 @@ class Exif {
   ];
 
   // returns the exif data array from an image, if function exists and exif array is valid
-  public static function exif($path){
+  public static function exif_data($path){
     $exif = function_exists('exif_read_data') ? @exif_read_data($path) : false;
     return !empty($exif) && is_array($exif) ? $exif : false;
   }
@@ -1772,7 +1772,7 @@ class Exif {
   public static function get($path){
 
     // get exif
-    $exif = self::exif($path);
+    $exif = self::exif_data($path);
     if(!$exif) return;
 
     // start output array
