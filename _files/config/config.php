@@ -1,4 +1,4 @@
-<?php
+<?php 
 
 // CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
