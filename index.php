@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.9.6
+/* Files Gallery 0.9.7
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -118,7 +118,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.9.6';   // Files Gallery version
+  public static $version = '0.9.7';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -467,7 +467,7 @@ class U {
   }
 
   // helper function to check for and include various files html, php, css and js from storage_path _files/*
-  public static function include($file){
+  public static function uinclude($file){
     if(!Config::$storagepath) return;
     $path = Config::$storagepath . '/' . $file;
     if(!file_exists($path)) return;
@@ -588,9 +588,9 @@ class U {
       <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAD1BMVEUui1f///9jqYHr9O+fyrIM/O8AAAABIklEQVR42u3awRGCQBBE0ZY1ABUCADQAoEwAzT8nz1CyLLszB6p+B8CrZuDWujtHAAAAAAAAAAAAAAAAAACOQPPp/2Y0AiZtJNgAjTYzmgDtNhAsgEkyrqDkApkVlsBDsq6wBIY4EIqBVuYVFkC98/ycCkr8CbIr6MCNsyosgJvsKxwFQhEw7APqY3mN5cBOnt6AZm/g6g2o8wYqb2B1BQcgeANXb0DuwOwNdKcHLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeA20mArmB6Ugg0NsCcP/9JS8GAKSlVZMBk8p1GRgM2R4jMHu51a/2G1ju7wfoNrYHyCtUY3zpOthc4MgdNy3N/0PruC/JlVAwAAAAAAAAAAAAAAABwZuAHuVX4tWbMpKYAAAAASUVORK5CYII=">
       <meta name="apple-mobile-web-app-capable" content="yes">
       <title><?php echo $title; ?></title>
-      <?php U::include('include/head.html'); ?>
+      <?php U::uinclude('include/head.html'); ?>
       <link href="<?php echo U::assetspath(); ?>files.photo.gallery@<?php echo Config::$version ?>/css/files.css" rel="stylesheet">
-      <?php U::include('css/custom.css'); ?>
+      <?php U::uinclude('css/custom.css'); ?>
     </head>
   <?php
   }
@@ -793,14 +793,14 @@ class Path {
 class Json {
 
   // output json from array and exit
-  public static function exit($arr = []){
+  public static function jexit($arr = []){
     header('content-type: application/json');
     exit(json_encode($arr));
   }
 
   // json error with message
   public static function error($error = 'Error'){
-    self::exit(['error' => $error]);
+    self::jexit(['error' => $error]);
   }
 
   // output json from array and cache as .json / used by class dirs and class dir
@@ -830,7 +830,7 @@ class X3 {
 
   // attempt to load x3-login if 1. root is X3 path, 2. there is no existing login, 3. files.x3-login.php exists
   public static function login(){
-    return self::path() && U::include('plugins/files.x3-login.php');
+    return self::path() && U::uinclude('plugins/files.x3-login.php');
   }
 
   // get public url path of X3, used to render X3 thumbnails instead of thumbs created by Files Gallery
@@ -1147,7 +1147,7 @@ class ResizeImage {
     $this->set_fill_color($ext);
 
     // imagecopyresampled() src_image to dst_image
-    if(!($function)($this->dst_image, $src_image, 0, 0, 0, 0, $this->rwidth, $this->rheight, $width, $height)) U::error("Function $function() failed", 500);
+    if(!call_user_func($function, $this->dst_image, $src_image, 0, 0, 0, 0, $this->rwidth, $this->rheight, $width, $height)) U::error("Function $function() failed", 500);
 
     // destroy src_image GD resource to free up memory
     imagedestroy($src_image);
@@ -1849,7 +1849,7 @@ class Filemanager {
     X3::invalidate();
 
     // output success / remove empty values, because javascript don't need em
-    Json::exit(array_filter($arr));
+    Json::jexit(array_filter($arr));
   }
 
   // check if name is allowed and return trimmed value / duplicate, new_file, new_folder, rename, zip
@@ -2275,7 +2275,7 @@ class Document {
 
       <div id="contextmenu" class="dropdown-menu" tabindex="-1"></div>
 
-      <?php U::include('include/footer.html'); ?>
+      <?php U::uinclude('include/footer.html'); ?>
 
 <!-- javascript -->
 <script>
@@ -2285,7 +2285,7 @@ var CodeMirror = {};
 <?php
 
 // load _files/js/custom.js if the file exists
-U::include('js/custom.js');
+U::uinclude('js/custom.js');
 
 // preload all Javascript assets
 foreach (array_filter([
@@ -2552,7 +2552,7 @@ if(U::get('action')){
   } else if($action === 'check_updates'){
     $json = @json_decode(@file_get_contents('https://data.jsdelivr.com/v1/package/npm/files.photo.gallery'), true);
     $latest = !empty($json) && isset($json['versions'][0]) && version_compare($json['versions'][0], Config::$version) > 0 ? $json['versions'][0] : false;
-    Json::exit([
+    Json::jexit([
       'success' => $latest,
       'writeable' => $latest && is_writable(__FILE__) // only check if __FILE__ is writeable if $latest
     ]);
@@ -2564,12 +2564,12 @@ if(U::get('action')){
     if(!$version || !Config::get('allow_check_updates') || version_compare($version, Config::$version) <= 0 || !is_writable(__FILE__)) $request->error('Error');
     $get = @file_get_contents('https://cdn.jsdelivr.net/npm/files.photo.gallery@' . $version . '/index.php');
     if(empty($get) || strpos($get, '<?php') !== 0 || !@file_put_contents(__FILE__, $get)) Json::error('failed to update');
-    Json::exit(['success' => true]);
+    Json::jexit(['success' => true]);
 
   // save input license key to user config
   } else if($action === 'save_license'){
     $key = $request->param('key');
-    Json::exit([
+    Json::jexit([
       'success' => $key && Config::$storageconfigpath && Config::save(['license_key' => $key]),
       'md5' => $key ? md5($key) : false
     ]);
@@ -2646,7 +2646,7 @@ if(U::get('action')){
   } else if($action === 'get_downloadables'){
 
     // return an array of downloadable files from within an array of $paths
-    Json::exit(Filemanager::get_downloadables($paths));
+    Json::jexit(Filemanager::get_downloadables($paths));
 
   // upload
   } else if($action === 'upload'){
@@ -2833,7 +2833,7 @@ if(U::get('action')){
 
   // $_GET tasks plugin (for pre-caching or clearing cache, not official plugin yet ...)
   } else if($action === 'tasks'){
-    if(!U::include('plugins/files.tasks.php')) $request->error('Can\'t find tasks plugin', 404);
+    if(!U::uinclude('plugins/files.tasks.php')) $request->error('Can\'t find tasks plugin', 404);
 
   // output PHP and server features by url ?action=tests / for diagnostics only
   } else if($action === 'tests'){
