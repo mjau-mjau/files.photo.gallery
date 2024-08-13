@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.9.8
+/* Files Gallery 0.9.9
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -118,7 +118,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.9.8';   // Files Gallery version
+  public static $version = '0.9.9';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -823,9 +823,14 @@ class X3 {
 
   // checks if Files Gallery root points into X3 content and returns path to X3 root
   public static function path(){
-    if(isset(self::$path)) return self::$path; // cache path
-    $arr = explode('/content', Config::$root);
-    return count($arr) > 1 && file_exists($arr[0] . self::$inc) ? $arr[0] : false;
+    if(isset(self::$path)) return self::$path; // serve previously resolved path
+    // loop resolved path and original config path, in case resolved path was symlinked content
+    foreach ([Config::$root, Config::get('root')] as $path) {
+      // match /content and check if /app/x3.inc.php exists in parent
+      if($path && preg_match('/(.+)\/content/', $path, $match)) return self::$path = file_exists($match[1] . self::$inc) ? Path::realpath($match[1]) : false;
+    }
+    // nope
+    return self::$path = false;
   }
 
   // attempt to load x3-login if 1. root is X3 path, 2. there is no existing login, 3. files.x3-login.php exists
