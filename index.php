@@ -2349,7 +2349,7 @@ foreach (array_filter([
 
     // return Javascript config array, merged (some values overridden) with main $config
     return array_replace($config, [
-      'script' => U::basename(__FILE__), // so JS knows where to post
+      'script' => Config::$config['script'] ?? U::basename(__FILE__), // so JS knows where to post
       'menu_exists' => $this->menu_exists, // so JS knows if menu exists
       'menu_cache_hash' => $this->menu_cache_hash, // hash to post from JS when loading menu to check cache
       'menu_cache_file' => $this->menu_cache_file, // direct url to JSON menu cache file if !menu_cache_validate
