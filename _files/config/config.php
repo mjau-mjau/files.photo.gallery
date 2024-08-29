@@ -5,6 +5,7 @@
 return array (
   //'root' => '',
   //'start_path' => false,
+  //'script' => null,
   //'username' => '',
   //'password' => '',
   //'load_images' => true,
