@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.9.12
+/* Files Gallery 0.10.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -25,7 +25,6 @@ class Request       / extract parameters for all actions
 class Document      / creates the main Files Gallery document response
 */
 
-
 // class Config / constructor and static methods to access config options
 class Config {
 
@@ -34,6 +33,7 @@ class Config {
   // Instead, add options into external config file in your storage_path _files/config/config.php (generated on first run)
   private static $default = [
     'root' => '',
+    'root_url_path' => null,
     'start_path' => false,
     'username' => '',
     'password' => '',
@@ -56,33 +56,19 @@ class Config {
     'folder_preview_image' => true,
     'folder_preview_default' => '_filespreview.jpg',
     'menu_enabled' => true,
-    'menu_show' => true,
     'menu_max_depth' => 5,
     'menu_sort' => 'name_asc',
     'menu_cache_validate' => true,
     'menu_load_all' => false,
     'menu_recursive_symlinks' => true,
     'layout' => 'rows',
-    'sort' => 'name_asc',
-    'sort_dirs_first' => true,
-    'sort_function' => 'locale',
     'cache' => true,
     'cache_key' => 0,
     'storage_path' => '_files',
     'files_exclude' => '',
     'dirs_exclude' => '',
     'allow_symlinks' => true,
-    'title' => '%name% [%count%]',
-    'history' => true,
-    'transitions' => true,
-    'click' => 'popup',
-    'click_window' => '',
-    'click_window_popup' => true,
-    'code_max_load' => 100000,
-    'topbar_sticky' => 'scroll',
     'get_mime_type' => false,
-    'context_menu' => true,
-    'prevent_right_click' => false,
     'license_key' => '',
     'filter_live' => true,
     'filter_props' => 'name, filetype, mime, features, title',
@@ -110,15 +96,17 @@ class Config {
     'upload_allowed_file_types' => '',
     'upload_max_filesize' => 0,
     'upload_exists' => 'increment',
-    'popup_video' => true,
     'video_thumbs' => true,
     'video_ffmpeg_path' => 'ffmpeg',
+    'pdf_thumbs' => true,
+    'imagemagick_path' => 'magick',
+    'use_google_docs_viewer' => false,
     'lang_default' => 'en',
-    'lang_auto' => true
+    'lang_auto' => true,
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.9.12';   // Files Gallery version
+  public static $version = '0.10.0';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -502,21 +490,41 @@ class U {
     return $val ? $val / 1024 / 1024 : 0; // convert bytes to M
   }
 
+  // get exec app path (ffmpeg, imagemagick)
+  private static function exec_app_path($app_path){
+
+    // external thumbnail apps required load_images and image_resize_cache to be enabled
+    foreach (['load_images', 'image_resize_cache'] as $key) if(!Config::get($key)) return;
+
+    // exec() must be available to access command-line tools
+    if(!function_exists('exec')) return;
+
+    // path to ffmpeg in command-line is normally just 'ffmpeg', but escapeshellarg() in case using absolute path
+    $path = escapeshellarg(Config::get($app_path));
+    //$path = '"' . str_replace('"', '\"', Config::get($app_path)) . '"'; // <- if path contains Chinese chars
+
+    // attempt to run -version function on app and return the path or false on fail
+    return @exec($path . ' -version') ? $path : false;
+  }
+
   // detect FFmpeg availability for video thumbnails and return path or false / https://ffmpeg.org/
   public static function ffmpeg_path(){
 
     // below config options must be enabled for FFmpeg to apply
-    foreach (['video_thumbs', 'load_images', 'image_resize_cache', 'video_ffmpeg_path'] as $key) if(!Config::get($key)) return;
+    foreach (['video_thumbs', 'video_ffmpeg_path'] as $key) if(!Config::get($key)) return;
 
-    // exec() must be available to access command-line FFmpeg
-    if(!function_exists('exec')) return;
+    // return imagemagick path for exec()
+    return U::exec_app_path('video_ffmpeg_path');
+  }
 
-    // path to ffmpeg in command-line is normally just 'ffmpeg', but escapeshellarg() in case using absolute path
-    $path = escapeshellarg(Config::get('video_ffmpeg_path'));
-    //$path = '"' . str_replace('"', '\"', Config::get('video_ffmpeg_path')) . '"'; // <- if path contains Chinese chars
+  // detect ImageMagick availability for PDF thumbnails and return path or false / https://imagemagick.org/
+  public static function imagemagick_path(){
 
-    // attempt to run -version function on ffmpeg and return the path or false on fail
-    return @exec($path . ' -version') ? $path : false;
+    // below config options must be enabled for FFmpeg to apply
+    foreach (['pdf_thumbs', 'imagemagick_path'] as $key) if(!Config::get($key)) return;
+
+    // return imagemagick path for exec()
+    return U::exec_app_path('imagemagick_path');
   }
 
   // readfile() wrapper function to output file with tests, clone option and headers
@@ -586,7 +594,7 @@ class U {
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <meta name="robots" content="noindex, nofollow">
       <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAD1BMVEUui1f///9jqYHr9O+fyrIM/O8AAAABIklEQVR42u3awRGCQBBE0ZY1ABUCADQAoEwAzT8nz1CyLLszB6p+B8CrZuDWujtHAAAAAAAAAAAAAAAAAACOQPPp/2Y0AiZtJNgAjTYzmgDtNhAsgEkyrqDkApkVlsBDsq6wBIY4EIqBVuYVFkC98/ycCkr8CbIr6MCNsyosgJvsKxwFQhEw7APqY3mN5cBOnt6AZm/g6g2o8wYqb2B1BQcgeANXb0DuwOwNdKcHLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeA20mArmB6Ugg0NsCcP/9JS8GAKSlVZMBk8p1GRgM2R4jMHu51a/2G1ju7wfoNrYHyCtUY3zpOthc4MgdNy3N/0PruC/JlVAwAAAAAAAAAAAAAAABwZuAHuVX4tWbMpKYAAAAASUVORK5CYII=">
-      <meta name="apple-mobile-web-app-capable" content="yes">
+      <meta name="mobile-web-app-capable" content="yes">
       <title><?php echo $title; ?></title>
       <?php U::uinclude('include/head.html'); ?>
       <link href="<?php echo U::assetspath(); ?>files.photo.gallery@<?php echo Config::$version ?>/css/files.css" rel="stylesheet">
@@ -677,6 +685,79 @@ class Path {
   // get relative path from full root path / used as internal reference and in query ?path/path
   public static function relpath($path){
     return trim(substr($path, strlen(Config::$root)), '\/');
+  }
+
+  // determines if root is accessible by URL and returns the root url path, which in turn allows files to be accessible by url
+  private static function get_root_url_path(){
+
+    // custom root url path if `root_url_path` is assigned
+    if(is_string(Config::get('root_url_path'))) return Config::get('root_url_path');
+
+    // if root is within application dir (index.php), we can serve application-relative path
+    if(self::is_within_path(Config::$root, Config::$__dir__)) return substr(Config::$root, strlen(Config::$__dir__) + 1);
+
+    // if root is within document root, serve root-relative path
+    if(self::is_within_docroot(Config::$root)) return substr(Config::$root, strlen(Config::$document_root));
+
+    // exit unless root is a symlink
+    // at this point, when `root` resolves outside of document root, we have to assume it's not directly accessible by url
+    // if you know your `root` is accessible by url somehow (nginx/apache/symlink), you can use the `root_url_path` config option
+    if(!is_link(Config::get('root'))) return false;
+
+    // in case someone wants to entirely disable resolving url path from root symlinks that point outside of document root
+    if(Config::get('root_url_path') === FALSE) return false;
+
+    // SYMLINK helpers
+    // because it's useful to point root to symlinks that might be in, but resolve outside document root
+
+    // assign $root shortcut just to make things more readable
+    $root = Config::get('root');
+
+    // don't mess around with absolute paths that point to symlinks outside of document root, as it's pointless and complicated
+    if(preg_match('/:\/|^\/|^\\\/', $root)) return false;
+
+    // to create a base app or root relative path, we need to trim orders
+    $trimmed_root = trim($root, './');
+
+    // check if root traverses up into parent dirs somewhere, and count traversal depth
+    $root_parent_depth = substr_count($root, '..');
+
+    // if root does not traverse parent dirs, we can assume it's relative to app (index.php)
+    // re-check if trimmed relative path exists and return app relative path
+    if(!$root_parent_depth) return file_exists($trimmed_root) ? $trimmed_root : false;
+
+    // attempt to assemble /root-relative path if root traverses up into parent dirs
+    // must check PHP_SELF for comparison and PHP > 7
+    if(!isset($_SERVER['PHP_SELF']) || version_compare(PHP_VERSION, '7.0.0') < 0) return false;
+
+    // PHP_SELF determines application root url path, so we can check root parent compared to application path
+    $php_self = $_SERVER['PHP_SELF'];
+
+    // get relative url depth of self (-1 because includes trailing slash with filename /path/index.php)
+    $php_self_depth = substr_count($php_self, '/') - 1;
+
+    // exit if root parent depth extends beyond php self depth
+    if($root_parent_depth >= $php_self_depth) return false;
+
+    // assemble root-relative url path by traversing php_self
+    return rtrim(dirname($php_self, $root_parent_depth + 1), '/') . '/' . $trimmed_root;
+  }
+
+  // create url path for a file from $root_url_path + file relative path / used for dir data, get_downloadables and uploads
+  private static $root_url_path;
+  public static function rooturlpath($rel){
+
+    // $root_url_path only needs to be assigned once when required
+    if(!isset(self::$root_url_path)) self::$root_url_path = self::get_root_url_path();
+
+    // return false if if $root_url_path is false
+    if(self::$root_url_path === FALSE) return false; //return self::urlpath($path);
+
+    // return $root_url_path if relative path is empty (would be the root dir)
+    if(!$rel) return self::$root_url_path;
+
+    // assemble url path for file from $root_url_path and $rel
+    return self::$root_url_path . (in_array(self::$root_url_path, ['', '/']) ? '' : '/') . $rel;
   }
 
   // get public url path relative to script or server document root
@@ -824,12 +905,12 @@ class X3 {
   // checks if Files Gallery root points into X3 content and returns path to X3 root
   public static function path(){
     if(isset(self::$path)) return self::$path; // serve previously resolved path
-    // loop resolved path and original config path, in case resolved path was symlinked content
+    // loop resolved path and original config path, in case resolved path was symlinked
     foreach ([Config::$root, Config::get('root')] as $path) {
       // match /content and check if /app/x3.inc.php exists in parent
-      if($path && preg_match('/(.+)\/content/', $path, $match)) return self::$path = file_exists($match[1] . self::$inc) ? Path::realpath($match[1]) : false;
+      if($path && preg_match('/(.+)\/content/', $path, $match) && file_exists($match[1] . self::$inc)) return self::$path = Path::realpath($match[1]);
     }
-    // nope
+    // no match found
     return self::$path = false;
   }
 
@@ -839,7 +920,7 @@ class X3 {
   }
 
   // get public url path of X3, used to render X3 thumbnails instead of thumbs created by Files Gallery
-  public static function urlpath(){
+  public static function x3_path(){
     return self::path() ? Path::urlpath(self::path()) : false;
   }
 
@@ -886,8 +967,11 @@ class Tests {
     // check various PHP functions
     foreach (['mime_content_type', 'finfo_file', 'iptcparse', 'exif_imagetype', 'session_start', 'ini_get', 'exec'] as $name) $this->prop($name . '()', function_exists($name));
 
-    // check ffmpeg if exec is available, else don't check, because ffmpeg could be enabled even if !exec()
+    // check ffmpeg if exec() is available
     if(function_exists('exec')) $this->prop('ffmpeg', !!U::ffmpeg_path());
+
+    // check imagemagick if exec() is available
+    if(function_exists('exec')) $this->prop('imagemagick', !!U::imagemagick_path());
 
     // get various PHP ini values with ini_get()
     if(function_exists('ini_get')) foreach (['memory_limit', 'file_uploads', 'upload_max_filesize', 'post_max_size', 'max_file_uploads'] as $name) $this->prop($name, 'neutral', @ini_get($name));
@@ -957,8 +1041,12 @@ class FileResponse {
   private $mime;
   private $resize;
   private $clone;
+  // static vars
+  //private static $preview_cmd_video = '%APP_PATH% -ss 3 -t 1 -hide_banner -i "%PATH%" -frames:v 1 -an -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg "%CACHE%" 2>&1';
+  private static $preview_cmd_video = '%APP_PATH% -ss 3 -t 1 -hide_banner -i "%PATH%" -frames:v 1 -an -vf "thumbnail,scale=min\'(480,iw)\':min\'(480,ih)\':force_original_aspect_ratio=decrease" -r 1 -y -f mjpeg "%CACHE%" 2>&1';
+  private static $preview_cmd_pdf = '%APP_PATH% "%PATH%[0]" -background white -flatten -quality 80 -thumbnail 480x480 "%CACHE%" 2>&1';
 
-  // construct resize image, all processes in due order
+  // construct FileResponse all processes in due order
   public function __construct($path, $resize = false, $clone = false){
 
     // exif if invalid $path
@@ -976,8 +1064,8 @@ class FileResponse {
     // clone the file (used by folder preview action)
     $this->clone = $clone;
 
-    // get FFmpeg video preview image
-    if($this->resize === 'video') return $this->get_video_preview();
+    // get preview from exec() for video/FFmpeg and pdf/Imagemagick
+    if(in_array($this->resize, ['video', 'pdf'])) return $this->get_exec_preview($this->resize);
 
     // get resized image preview (convert resize parameter to number, else it will return 0, not allowed)
     if($this->resize) return $this->get_image_preview();
@@ -986,41 +1074,50 @@ class FileResponse {
     $this->get_file_proxied();
   }
 
-  // get FFmpeg video preview image
-  private function get_video_preview(){
+  // get preview from exec() for video/FFmpeg and pdf/Imagemagick
+  private function get_exec_preview($type){
 
-    // image_resize_cache required
-    if(!Config::get('image_resize_cache')) U::error('image_resize_cache must be enabled to create and store video thumbs', 400);
+    // image_resize_cache required for exec previews, because we need to create the file on disk anyway
+    if(!Config::get('image_resize_cache')) U::error("image_resize_cache must be enabled to create and store $type previews", 400);
 
-    // requirements with diagnostics / only check $mime if $mime detected
-    if($this->mime && strtok($this->mime, '/') !== 'video') U::error('Unsupported video type ' . $this->mime, 415);
+    // requirements / only check $mime if $mime detected
+    if($this->mime && strpos($this->mime, $this->resize) === false) U::error("Unsupported $type type $this->mime", 415);
+
+    // get FFmpeg path `video_ffmpeg_path` or error
+    if($type === 'video'){
+      $app_path = U::ffmpeg_path() ?: U::error('Video thumbnails disabled, check your <a href="' . U::basename(__FILE__) . '?action=tests" target="_blank">diagnostics</a>', 400);
+
+    // get ImageMagick path `imagemagick_path` or error
+    } else {
+      $app_path = U::imagemagick_path() ?: U::error('PDF thumbnails disabled, check your <a href="' . U::basename(__FILE__) . '?action=tests" target="_blank">diagnostics</a>', 400);
+    }
 
     // get cache path, where we will look for image or create it
     $cache = Path::imagecachepath($this->path, 480, filesize($this->path), filemtime($this->path));
 
-    // check for cached video thumbnail / clone if called from folder preview
-    if($cache) U::readfile($cache, 'image/jpeg', 'Video preview from cache', true, $this->clone);
+    // check for cached preview / clone if called from folder preview
+    if($cache) U::readfile($cache, 'image/jpeg', "$type preview from cache", true, $this->clone);
 
-    // get FFmpeg path `video_ffmpeg_path` or error
-    $ffmpeg_path = U::ffmpeg_path() ?: U::error('<a href="http://ffmpeg.org/" target="_blank">FFmpeg</a> disabled. Check your <a href="' . U::basename(__FILE__) . '?check=1" target="_blank">diagnostics</a>.', 400);
+    // get exec command string
+    $cmd = str_replace(
+      ['%APP_PATH%', '%PATH%', '%CACHE%'],
+      [$app_path, str_replace('"', '\"', $this->path), $cache],
+      self::${"preview_cmd_$type"});
 
-    // ffmpeg command to create video preview in $cache path
-    $cmd = $ffmpeg_path . ' -ss 3 -t 1 -hide_banner -i "' . str_replace('"', '\"', $this->path) . '" -frames:v 1 -an -vf "thumbnail,scale=480:320:force_original_aspect_ratio=increase,crop=480:320" -r 1 -y -f mjpeg "' . $cache . '" 2>&1';
-
-    // attempt to execute FFmpeg command
+    // attempt to execute exec command
     exec($cmd, $output, $result_code);
 
     // fail if result_code is anything else than 0
-    if($result_code) U::error("Error generating thumbnail for video (\$result_code $result_code)", 500);
+    if($result_code) U::error("Error generating $type preview image (\$result_code $result_code)", 500);
 
     // if for some reason, the created $cache file does not exist
     if(!file_exists($cache)) U::error('Cache file ' . U::basename($cache) . ' does not exist', 404);
 
-    // fix for empty video previews that get created for extremely short videos (or other unknown errors)
+    // fix for empty preview images (f.ex extremely short videos or other unknown errors)
     if(!filesize($cache) && imagejpeg(imagecreate(1, 1), $cache)) U::readfile($cache, 'image/jpeg', '1px placeholder image created and cached', true, $this->clone);
 
     // output created video thumbnail
-    U::readfile($cache, 'image/jpeg', 'Video preview image created', true, $this->clone);
+    U::readfile($cache, 'image/jpeg', "$type preview created", true, $this->clone);
   }
 
   // check if requested resize value is allowed
@@ -1370,6 +1467,8 @@ class Dir {
   public $data; // array of public data to be returned / shared with File
   public $path; // path of dir / shared with File
   public $realpath; // dir realpath, normally the same as $path, unless $path contains symlink
+  public $relpath; // dir path relative to root
+  public $memory_limit_mb; // get memory_limit_mb as it might be required by exif_read_data()
   private $filemtime; // dir filemtime (modified time), used for cache validation and data
   private $filenames; // array of file names in dir
   private $cache_path; // calculated json file cache path
@@ -1378,6 +1477,7 @@ class Dir {
   public function __construct($path){
     $this->path = $path;
     $this->realpath = $path ? Path::realpath($path) : false;
+    $this->relpath = Path::relpath($this->path);
     $this->filemtime = filemtime($this->realpath);
     $this->cache_path = $this->get_cache_path();
   }
@@ -1416,15 +1516,19 @@ class Dir {
       'is_dir' => true,
       'mime' => 'directory',
       'mtime' => $this->filemtime,
-      'path' => Path::relpath($this->path), // if path is realpath and is symlinked, it might be wrong
+      'path' => $this->relpath,
       'files_count' => 0,
       'dirsize' => 0,
       'images_count' => 0,
-      'url_path' => Path::urlpath($this->path)
+      'url_path' => Path::rooturlpath($this->relpath),
     ];
 
     // get files[] array for dir
-    if($files) $this->get_files();
+    if($files) {
+      // memory_limit_mb might be required to check if we can use exif_read_data()
+      if(!isset($this->memory_limit_mb)) $this->memory_limit_mb = U::get_memory_limit_mb();
+      $this->get_files();
+    }
 
     // assign direct url to json cache file for faster loading from javascript / used by Dirs class (menu), only when !files
     // won't work if you have blocked public web access to cache dir files / if so, comment out the below line
@@ -1436,8 +1540,8 @@ class Dir {
 
   // get json cache path for dir (does not validate if cache file exists)
   private function get_cache_path(){
-    if(!Config::get('cache') || !$this->realpath) return;
-    return Config::$cachepath . '/folders/' . U::dirs_hash() . '.' . substr(md5($this->realpath), 0, 6) . '.' . $this->filemtime . '.json';
+    if(!Config::get('cache') || !$this->path) return;
+    return Config::$cachepath . '/folders/' . U::dirs_hash() . '.' . substr(md5($this->path), 0, 6) . '.' . $this->filemtime . '.json';
   }
 
   // used to check if json cache file exists, and therefore is valid
@@ -1479,7 +1583,7 @@ class Dir {
 
     // sort files by natural case, with dirs on top (already sorts in javascript, but faster when pre-sorted in cache)
     uasort($this->data['files'], function($a, $b){
-      if(!Config::get('sort_dirs_first') || $a['is_dir'] === $b['is_dir']) return strnatcasecmp($a['basename'], $b['basename']);
+      if($a['is_dir'] === $b['is_dir']) return strnatcasecmp($a['basename'], $b['basename']);
       return $b['is_dir'] ? 1 : -1;
     });
   }
@@ -1529,7 +1633,10 @@ class File {
     $is_link = $symlinked ? is_link($path) : false;
 
     // get filesize if !$is_dir
-    $filesize = $is_dir ? 0 : filesize($this->realpath);
+    $filesize = $is_dir ? 0 : filesize($this->realpath); // filesize($path) if we only want to get size of symlink (0)
+
+    // get relative path by appending filename to dir path
+    $relpath = ltrim($this->dir->data['path'] . '/', '/') . $filename;
 
     // append filesize to parent dirsize
     $this->dir->data['dirsize'] += $filesize;
@@ -1546,8 +1653,8 @@ class File {
       'is_link' => $is_link,
       'is_dir' => $is_dir,
       'mtime' => filemtime($this->realpath),
-      'path' => ltrim($this->dir->data['path'] . '/', '/') . $filename,
-      'url_path' => Path::urlpath($path)
+      'path' => $relpath,
+      'url_path' => Path::rooturlpath($relpath),
     ];
 
     // assign file mime type / will return null for most files unless config get_mime_type = true (slow)
@@ -1571,6 +1678,12 @@ class File {
     return null; // don't check mime, mime will be detected from extension in javascript
   }
 
+  // we need to make sure memory is sufficient before using exif_read_data() so folders doesn't break on massive image files
+  // this is a very rough estimation
+  private function memory_sufficient_exif(){
+    return !$this->dir->memory_limit_mb || $this->dir->memory_limit_mb > ($this->image['width'] * $this->image['height'] * ($this->image['bits'] ?? 8) / 8 * ($this->image['channels'] ?? 4) * 1.5) / 1048576;
+  }
+
   // assign image data if file is image
   private function set_image_data(){
 
@@ -1592,8 +1705,8 @@ class File {
     // get image Iptc
     $this->image['iptc'] = Iptc::get($this->image_info);
 
-    // get image Exif
-    $this->image['exif'] = Exif::get($this->realpath);
+    // get image Exif if we anticipate memory is sufficient
+    if($this->memory_sufficient_exif()) $this->image['exif'] = Exif::get($this->realpath);
 
     // invert image width height if exif orientation is > 4 && < 9, because dimensions should match browser-oriented image
     $this->image_orientation_flip_dimensions();
@@ -1901,15 +2014,15 @@ class Filemanager {
 
   // delete single file or folder
   private static function delete_file_or_folder($path){
-    return is_dir($path) ? @rmdir($path) : @unlink($path);
+    return is_dir($path) && !is_link($path) ? @rmdir($path) : @unlink($path);
   }
 
   // delete single file or folder recursively
   public static function delete($path){
 
-    // if dir, iterate recursively and attempt to delete all descendants
+    // if dir, iterate recursively and attempt to delete all descendants / don't iterate if is symlink
     // check if_writeable() will skip dirs that are not writeable, because we can't delete direct children. However, we may still be able to delete deep descendants, so might as well try to delete what can be deleted.
-    if(is_dir($path)/* && is_writable($path)*/) foreach (self::iterator($path, RecursiveIteratorIterator::CHILD_FIRST) as $item) self::$success += self::delete_file_or_folder($item->getPathname());
+    if(is_dir($path) && !is_link($path)/* && is_writable($path)*/) foreach (self::iterator($path, RecursiveIteratorIterator::CHILD_FIRST) as $item) self::$success += self::delete_file_or_folder($item->getPathname());
 
     // delete file or folder after first deleting recursive items in folder
     return self::delete_file_or_folder($path);
@@ -1920,6 +2033,13 @@ class Filemanager {
     // if(Path::is_exclude($to, is_dir($from))) return false; // exclude copy $to paths? kinda pointless
     if(Path::is_within_path($to, $from)) return false; // don't allow copying files or dirs into self or same location
     //if(!is_readable($from)) return false; // already checked in valid_rootpath() filter
+    // if item is symlink, we recreate the symlink in $to location
+    // we can't copy() symlinks and we don't want to copy the original target file or dir of the $from symlink
+    if(is_link($from)) {
+      if(!function_exists('symlink')) return false; // can't proceed if symlink() doesn't work
+      $target = @realpath(readlink($from)) ?: $from; // attempt to resolve symlink, so we don't end up with a chain of symlinks
+      return @symlink($target, $to); // create symlink
+    }
     if(is_dir($from)) return is_dir($to) || @mkdir($to, 0777, true); // is_dir already or make new dir
     if(!is_readable($from)) return false; // can't read file source / might be recursive file
     if(file_exists($to) && filemtime($to) >= filemtime($from)) return false; // file already exists and is newer than source
@@ -1931,7 +2051,8 @@ class Filemanager {
   // copy single file or folder recursively / kinda how the default php copy() should have worked? Also used for duplicate
   public static function copy($from, $to){
     if(!self::copy_file_or_folder($from, $to)) return false; // only continue on success
-    if(is_dir($from)) {
+    // copy dirs recursively, unless symlink (the dir symlink is already copied, and we don't want to clone the entire symlink target)
+    if(is_dir($from) && !is_link($from)) {
       $iterator = self::iterator($from);
       foreach ($iterator as $descendant) self::$success += self::copy_file_or_folder($descendant, $to . '/' . $iterator->getSubPathName());
     }
@@ -1943,6 +2064,11 @@ class Filemanager {
     // if(Path::is_exclude($to, is_dir($from))) return false; // exclude move $to paths? Kinda pointless
     if(Path::is_within_path($to, $from)) return false; // don't allow moving files or dirs into self or same location
     if(file_exists($to) && filemtime($to) >= filemtime($from)) return false; // $to already exists and is newer than $from
+    // if symlink and symlink target is relative, attempt to write symlink with canonical path to preserve symlink target
+    if(is_link($from) && function_exists('symlink') && !@realpath(readlink($from))) {
+      $target = @realpath(dirname($from) . '/' . readlink($from)); // attempt to resolve path relative to owner dir of symlink
+      if($target) return @symlink($target, $to);
+    }
     return @rename($from, $to); // can overwrite existing older files, but fails to overwrite non-empty dirs, which is ok
   }
 
@@ -1974,15 +2100,21 @@ class Filemanager {
 
     // loop dir $paths / only dir $paths are forwarded to check recursively, as JS already knows the files
     foreach ($paths as $dir) {
+      //if(is_link($dir)) continue; // un-comment if you dont' want downloads to follow symlinks / also inside foreach loop
       if(Path::is_exclude($dir, true)) continue; // shouldn't be necessary when forwarded from frontend, but just in case
       foreach (self::iterator($dir) as $item) { // loop dirs get all descendants
         $path = $item->getPathname();
+
         // create download list from readable, non-excluded files only (not dirs, as we don't download a dir)
-        if(!is_readable($path) || is_dir($path) || Path::is_exclude($path, false)) continue;
-        // send to Javascript
+        if(!is_readable($path) || is_dir($path) || Path::is_exclude($path, false)/* || is_link($path)*/) continue;
+
+        // prepare relative app path
+        $relpath = Path::relpath($path);
+
+        // append to downloadables array
         $downloadables[] = [
-          'path' => Path::relpath($path),
-          'url_path' => Path::urlpath($path),
+          'path' => $relpath,
+          'url_path' => Path::rooturlpath($relpath),
           'basename' => U::basename($path),
           'ext' => U::extension($path),
           'filesize' => filesize($path)
@@ -2085,6 +2217,7 @@ class Zipper extends Filemanager {
 
   // add_file_or_dir
   private function add_file_or_dir($path, $root){
+    //if(is_link($path)) return; // un-comment if zip should not follow symlinks
     if(Path::is_exclude($path, is_dir($path)) || !is_readable($path)) return false; // file excluded, continue
     $local_path = str_replace($root, '', $path); // local path relative to root
     return is_dir($path) ? @$this->zip->addEmptyDir($local_path) : @$this->zip->addFile($path, $local_path);
@@ -2097,14 +2230,12 @@ class Request {
   // vars
   public $action;
   public $params;
-  private $is_post;
+  public $is_post;
 
   // construct
   public function __construct(){
     $this->action = U::get('action');
     $this->is_post = $_SERVER['REQUEST_METHOD'] === 'POST';
-    // check that request method matches action, so we can't make POST requests from GET / this should be improved
-    if($this->is_post === in_array($this->action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $this->error('Invalid request method ' . $_SERVER['REQUEST_METHOD']);
     $this->params = $this->get_request_data();
     if(!is_array($this->params)) $this->error('Invalid parameters');
   }
@@ -2192,7 +2323,7 @@ class Document {
 
   // parse query_string and get first ?parameter to be considered path
   private function get_query_path(){
-    if(!Config::get('history') || empty($_SERVER['QUERY_STRING'])) return; // only if history and QUERY_STRING
+    if(empty($_SERVER['QUERY_STRING'])) return; // exit if !QUERY_STRING
     $path = explode('&', $_SERVER['QUERY_STRING'])[0]; // get first parameter in QUERY_STRING for path
     if(!$path || strpos($path, '=') !== false) return; // make sure path exists and is not assigned parameter=value
     return trim(rawurldecode($path), '/'); // trime and decode
@@ -2253,7 +2384,7 @@ class Document {
     ?>
     <body class="body-loading">
       <main id="main">
-        <nav id="topbar"<?php if(Config::get('topbar_sticky')) echo ' class="topbar-sticky"'; ?>>
+        <nav id="topbar" class="topbar-sticky">
           <div id="topbar-top">
             <div id="search-container"><input id="search" class="input" type="search" placeholder="search" size="1" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" disabled></div>
             <div id="change-layout" class="dropdown"></div>
@@ -2339,6 +2470,8 @@ foreach (array_filter([
       'license_key',
       'video_thumbs',
       'video_ffmpeg_path',
+      'pdf_thumbs',
+      'imagemagick_path',
       'folder_preview_default',
       'image_resize_dimensions_allowed',
       'download_dir_cache'
@@ -2368,8 +2501,9 @@ foreach (array_filter([
       'image_resize_memory_limit' => $this->get_image_resize_memory_limit(), // so JS can calculate what images can be resized
       'md5' => $this->get_md5('6c6963656e73655f6b6579'), // calculate md5 hash
       'video_thumbs_enabled' => !!U::ffmpeg_path(), // so JS can attempt to load video preview images
+      'pdf_thumbs_enabled' => !!U::imagemagick_path(), // so JS can attempt to load PDF preview images
       'lang_custom' => $this->lang_custom(), // get custom language files _files/lang/*.json
-      'x3_path' => X3::urlpath(), // in case of used with X3, forward X3 url path for thumbnails
+      'x3_path' => X3::x3_path(), // in case of used with X3, forward X3 url path for thumbnails
       'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false, // forward USERX from server (if set)
       'assets' => U::assetspath(), // calculated assets path (Javascript and CSS files from CDN or local)
       'watermark_files' => $this->get_watermark_files(), // get uploaded watermark files (font, image) from _files/watermark/*
@@ -2454,6 +2588,9 @@ if(U::get('action')){
 
   // only allow valid actions
   if(!in_array($action, ['files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
+
+  // check that request method matches action, so we can't make POST requests from GET / this should be improved
+  if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
 
   // check if actions with config allow_{$ACTION} (most write actions) are allowed
   if(isset(Config::$config['allow_' . $action]) && !Config::get('allow_' . $action)) $request->error("$action not allowed");
@@ -2549,7 +2686,6 @@ if(U::get('action')){
 
   // read text file
   } else if($action === 'load_text_file'){
-    if(filesize($file) > Config::get('code_max_load')) U::error('File size exceeds `code_max_load`', 400);
     header('content-type: text/plain; charset=UTF-8');
     if(@readfile($file) === false) U::error('failed to read file', 500);
 
@@ -2706,7 +2842,7 @@ if(U::get('action')){
       if(!$is_valid) $request->error("Invalid file type $filename");
 
       // for additional security, check if uploaded image is an actual image with exif_imagetype() function
-      if(function_exists('exif_imagetype') && in_array($ext, ['.gif', '.jpeg', '.jpg', '.png', '.swf', '.psd', '.bmp', '.tif', '.tiff', 'webp', 'avif']) && !@exif_imagetype($upload['tmp_name'])) $request->error("Invalid image type $filename");
+      if(function_exists('exif_imagetype') && in_array($ext, ['.gif', '.jpeg', '.jpg', '.png', '.swf', '.psd', '.bmp', '.tif', '.tiff', '.webp', '.avif']) && !@exif_imagetype($upload['tmp_name'])) $request->error("Invalid image type $filename");
     }
 
     // create subdirs when relativePath exists (keeps folder structure from drag and drop)
@@ -2729,7 +2865,7 @@ if(U::get('action')){
     Filemanager::json([
       'success' => @move_uploaded_file($upload['tmp_name'], $move_path),
       'filename' => $filename, // return filename in case it was incremented or renamed
-      'url' => Path::urlpath($move_path) // for usage with showLinkToFileUploadResult
+      'url' => Path::rooturlpath(Path::relpath($move_path)), // for usage with showLinkToFileUploadResult
     ], 'failed to move_uploaded_file()');
 
   // $_GET download_dir_zip / download files in directory as zip file
@@ -2816,7 +2952,7 @@ if(U::get('action')){
         // skip if is_exclude or !readable
         if(Path::is_exclude($file, false) || !is_readable($file)) continue;
 
-        // get preview image ro video, and clone into preview $cache for faster access on next request for dir
+        // get preview image or video, and clone into preview $cache for faster access on next request for dir
         new FileResponse($file, $match, $cache);
         break; exit; // just in case, although new FileResponse() will exit on U::readfile()
       }
