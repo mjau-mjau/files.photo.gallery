@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.10.1
+/* Files Gallery 0.10.2
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -106,7 +106,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.10.1';   // Files Gallery version
+  public static $version = '0.10.2';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -737,7 +737,7 @@ class Path {
     $php_self_depth = substr_count($php_self, '/') - 1;
 
     // exit if root parent depth extends beyond php self depth
-    if($root_parent_depth >= $php_self_depth) return false;
+    if($root_parent_depth > $php_self_depth) return false;
 
     // assemble root-relative url path by traversing php_self
     return rtrim(dirname($php_self, $root_parent_depth + 1), '/') . '/' . $trimmed_root;
@@ -2450,6 +2450,7 @@ foreach (array_filter([
     // exclude config user settings for frontend (Javascript) when sensitive and/or not used in frontend
     $exclude = [
       'root',
+      'root_url_path',
       'start_path',
       'image_resize_cache',
       'image_resize_quality',
@@ -2474,7 +2475,8 @@ foreach (array_filter([
       'imagemagick_path',
       'folder_preview_default',
       'image_resize_dimensions_allowed',
-      'download_dir_cache'
+      'download_dir_cache',
+      'imagemagick_path',
     ];
 
     // create config array without excluded items
