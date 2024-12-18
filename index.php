@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.10.2
+/* Files Gallery 0.10.3
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -106,7 +106,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.10.2';   // Files Gallery version
+  public static $version = '0.10.3';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -694,7 +694,18 @@ class Path {
     if(is_string(Config::get('root_url_path'))) return Config::get('root_url_path');
 
     // if root is within application dir (index.php), we can serve application-relative path
-    if(self::is_within_path(Config::$root, Config::$__dir__)) return substr(Config::$root, strlen(Config::$__dir__) + 1);
+    //if(self::is_within_path(Config::$root, Config::$__dir__)) return substr(Config::$root, strlen(Config::$__dir__) + 1);
+
+
+    // if root is within application dir (index.php), we can serve application-relative path
+    if(self::is_within_path(Config::$root, Config::$__dir__)) {
+
+      // if root is same as app dir (quite common), return empty relative path ''
+      if(Config::$root === Config::$__dir__) return '';
+
+      // return relative path from app to root
+      return substr(Config::$root, strlen(Config::$__dir__) + 1);
+    }
 
     // if root is within document root, serve root-relative path
     if(self::is_within_docroot(Config::$root)) return substr(Config::$root, strlen(Config::$document_root));
