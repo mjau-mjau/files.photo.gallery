@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.10.3
+/* Files Gallery 0.10.4
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -106,7 +106,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.10.3';   // Files Gallery version
+  public static $version = '0.10.4';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -347,11 +347,8 @@ class Login {
     // trim form password
     $fpassword = trim(U::post('fpassword'));
 
-    // use password_verify() to verify, if password is encrypted with password_hash() (most secure)
-    if(function_exists('password_needs_rehash') && !password_needs_rehash($this->password, PASSWORD_DEFAULT)) return password_verify($fpassword, $this->password);
-
-    // verify vs non-encrypted password or if password was stored with md5
-    return $fpassword === $this->password || md5($fpassword) === $this->password;
+    // verify encrypted or non-encrypted or md5() match (legacy)
+    return password_verify($fpassword, $this->password) || $fpassword === $this->password || md5($fpassword) === $this->password;
   }
 
   // lowercase username for case-insensitive username validation uses mb_strtolower() if function exists
