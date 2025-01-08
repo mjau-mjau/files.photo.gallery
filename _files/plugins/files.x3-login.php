@@ -51,7 +51,8 @@ class X3_login {
 		}
 
 		// assume full filemanager permissions when X3 login plugin is present and used
-		foreach ([
+		$this->set('allow_all', true);
+		/*foreach ([
 			'upload',
 			'delete',
 			'rename',
@@ -65,7 +66,7 @@ class X3_login {
 			'copy',
 			'mass_download',
 			'mass_copy_links'
-		] as $key) $this->set("allow_$key", true);
+		] as $key) $this->set("allow_$key", true);*/
 
 		// exclude .json files as we don't want these visible
 		$this->set('files_exclude', '/\.json$/i');

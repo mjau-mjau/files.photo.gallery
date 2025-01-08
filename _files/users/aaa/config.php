@@ -1,13 +1,13 @@
-<?php 
+<?php
 
 // CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
 return array (
-  //'root' => '',
+  'root' => './content/users/aaa',
   //'root_url_path' => NULL,
   //'start_path' => false,
   //'username' => '',
-  //'password' => '',
+  'password' => 'aaa',
   //'load_images' => true,
   //'load_files_proxy_php' => false,
   //'load_images_max_filesize' => 1000000,
@@ -41,10 +41,11 @@ return array (
   //'allow_symlinks' => true,
   //'get_mime_type' => false,
   //'license_key' => '',
+  //'filter_live' => true,
+  //'filter_props' => 'name, filetype, mime, features, title',
   //'download_dir' => 'browser',
   //'download_dir_cache' => 'dir',
   //'assets' => '',
-  //'allow_all' => false,
   //'allow_upload' => false,
   //'allow_delete' => false,
   //'allow_rename' => false,

@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.10.4
+/* Files Gallery 0.11.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -70,11 +70,10 @@ class Config {
     'allow_symlinks' => true,
     'get_mime_type' => false,
     'license_key' => '',
-    'filter_live' => true,
-    'filter_props' => 'name, filetype, mime, features, title',
     'download_dir' => 'browser',
     'download_dir_cache' => 'dir',
     'assets' => '',
+    'allow_all' => false,
     'allow_upload' => false,
     'allow_delete' => false,
     'allow_rename' => false,
@@ -106,7 +105,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.10.4';   // Files Gallery version
+  public static $version = '0.11.0';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -118,7 +117,7 @@ class Config {
   public static $__file__;            // absolute __FILE__ path with normalized OS path
   public static $root;                // absolute root path interpolated from config root option, normally current dir
   public static $document_root;       // absolute server document root with normalized OS path
-  public static $has_login;           // detect if there application has login
+  public static $is_logged_in;        // detect if user is logged in
   public static $created = [];        // checks what dirs and files get created by config on ?action=tests
 
   // config construct created static app vars and merge configs
@@ -137,6 +136,9 @@ class Config {
     // set absolute storagepath, create storage dirs if required, and load, create or update storage config.php
     $this->storage();
 
+    // at this point we must check if login is required or user is already logged in, and then merge user config
+    new Login();
+
     // assign public real root path
     self::$root = Path::realpath(self::get('root'));
 
@@ -149,8 +151,8 @@ class Config {
     // get server document root with normalized OS path
     self::$document_root = Path::realpath($_SERVER['DOCUMENT_ROOT']);
 
-    // assign public $has_login if username or password or X3 login (plugin)
-    self::$has_login = self::get('username') || self::get('password') || X3::login();
+    // assign public $is_logged_in if username or password or X3 login (plugin)
+    self::$is_logged_in = self::get('username') || self::get('password');// || X3::login();
   }
 
   // public shortcut function to get config option Config::get('option')
@@ -244,53 +246,195 @@ class Config {
   }
 }
 
-// class Login / check and manage logins
+// class Login / check and manage login
 class Login {
 
   // vars
-  private $username;    // config username
-  private $password;    // config password
-  private $is_logout;   // is_logout gets assigned when user logs out
-  private $client_hash; // hash unique to client and install location, must match on login from form
-  private $login_hash;  // unique hash for $_SESSION['login']
-  private $sidmd5;      // encrypted session ID to compare on login
+  private $user; // config array for logged in user, will merge with main config
+  private $has_public_login; // public (default config) login exists / in this case, login is required
 
-  // start new login check
+  // start new login check process
   public function __construct() {
 
-    // assign $username and $password shortcuts from config
-    $this->username = Config::get('username');
-    $this->password = Config::get('password');
+    // public (default config) login exists / in this case, login is required / also check X3:login() plugin
+    $this->has_public_login = Config::get('username') && Config::get('password') ? true : X3::login();
 
-    // make sure username or password is not empty
-    foreach (['username', 'password'] as $key) if(!$this->{$key}) U::error("$key can't be empty");
+    // check if there is any login, from default config or users, so we can check session and login attempt or show login form
+    if(!$this->has_public_login && !$this->users_dir()){
+      // unset session token in case it remains in any active session for some reason (probably shouldn't happen)
+      if(isset($_SESSION['token'])) unset($_SESSION['token']);
+      return;
+    }
 
     // PHP session_start() or error
+    // check active sessions, session token on login attempt or assign session token on login form
     if(session_status() === PHP_SESSION_NONE && !session_start()) U::error('Failed to initiate PHP session_start()', 500);
 
-    // create a unique client hash specific to install location, must match on login from login form
-    $this->client_hash = md5($this->ip() . $this->server('HTTP_USER_AGENT') . __FILE__ . $this->server('HTTP_HOST'));
+    // check if browser is already logged in by session
+    if($this->is_logged_in()){
+      // allow ?logout=1 only if user is already logged in
+      if(U::get('logout')) return $this->form();
+      // merge user config and continue
+      return $this->login();
+    }
 
-    // create a unique login hash used for $_SESSION['login']
-    $this->login_hash = md5($this->username . $this->password . $this->client_hash);
+    // ?login=1 displays login form, if user is not already logged in
+    // this only applies when login is not required !$this->has_public_login, else the login form will always display
+    if(U::get('login')) return $this->form();
 
-    // return to app if user is already logged in
-    if($this->is_logged_in()) return;
+    // detect $_POST login attempt
+    if($this->is_login_attempt()) {
 
-    // exit with error on ?action requests (is not login attempt, and don't show login form)
-    if($this->unauthorized()) return;
+      // on successful login, merge user config and continue
+      if($this->is_successful_login()) return $this->login();
 
-    // get md5() hashed version of session ID, to compare from login form on login
-    $this->sidmd5 = md5(session_id());
+    // if default config is without login, serve request without login
+    } else if(!$this->has_public_login){
+      return;
+    }
 
-    // verify login (may or may not be login attempt) or show form
-    if(!$this->verify_login()) return $this->form();
+    // return error if request is an action (don't display login form)
+    if($this->action_request()) return;
 
-    // on successful login, store $_SESSION['login'] as login_hash
-    return $_SESSION['login'] = $this->login_hash;
+    // display form if not logged in or login failed attempt
+    $this->form();
   }
 
-  // get client IP for unique client_hash
+  // check if _files/users dir exists and return path
+  private function users_dir(){
+    return Config::$storagepath && file_exists(Config::$storagepath . '/users') ? Config::$storagepath . '/users' : false;
+  }
+
+  // check if user is already logged in by session
+  private function is_logged_in(){
+
+    // exit if session username or login hash is not set
+    if(!isset($_SESSION['username']) || !isset($_SESSION['login'])) return false;
+
+    // get user config from $_SESSION username
+    $this->user = $this->get_user($_SESSION['username']);
+
+    // logged in if user found login hash matches session login hash
+    // may fail if user is deleted or username/password/IP/user-agent/app-location changes
+    return $this->user && $this->equals($this->login_hash($this->user), $_SESSION['login']);
+  }
+
+  // detect login attempt
+  private function is_login_attempt(){
+
+    // on javascript fetch() from non-login interface, we must populate $_POST from php://input
+    if(U::get('action') === 'login' && empty($_POST)) $_POST = @json_decode(@trim(@file_get_contents('php://input')), true);
+
+    // is login attempt if $_POST['fusername']
+    return !!U::post('fusername');
+  }
+
+  // detect successful login attempt
+  private function is_successful_login(){
+
+    // login attempt if fusername, fpassword and token in $_POST and 'token' exists in $_SESSION
+    if(!U::post('fusername') || !U::post('fpassword') || !U::post('token') || !isset($_SESSION['token'])) return false;
+
+    // make sure $_SESSION token matches $_POST token
+    if(!$this->equals($_SESSION['token'], U::post('token'))) return false;
+
+    // get user config from $_POST username
+    $this->user = $this->get_user($_POST['fusername']);
+
+    // exit if can't find user or password doesn't match
+    if(!$this->user || !$this->passwords_match($this->user['password'], $_POST['fpassword'])) return false;
+
+    // store username in session
+    $_SESSION['username'] = $this->user['username'];
+
+    // store login hash specific to user, must match on active sessions
+    $_SESSION['login'] = $this->login_hash($this->user);
+
+    // successfull login
+    return true;
+  }
+
+  // successfully logged in by session or login attempt
+  private function login(){
+
+    // list of excluded user config options because they should be global or have no function for user or could cause harm
+    // you can add your own options here if you want to prevent some options from being changed per user
+    $user_exclude = [
+      'image_resize_dimensions',          // should not change per user as it invalidates shared image cache
+      'image_resize_dimensions_retina',   // should not change per user as it invalidates shared image cache
+      'image_resize_dimensions_allowed',  // should not change per user as it invalidates shared image cache
+      'image_resize_quality',             // should not change per user as it invalidates shared image cache
+      'image_resize_function',            // should not change per user as it invalidates shared image cache
+      'image_resize_sharpen',             // should not change per user as it invalidates shared image cache
+      'storage_path',                     // storage path is always global and must be defined in main config
+      'video_ffmpeg_path',                // should be in global config
+      'imagemagick_path',                 // should be in global config
+    ];
+
+    // merge user config into config object
+    Config::$config = array_replace(Config::$config, array_diff_key($this->user, array_flip($user_exclude)));
+  }
+
+  // get user config from login attempt or session
+  private function get_user($username){
+
+    // trim username just in case
+    $username = trim($username);
+
+    // create lowercase username for case-insensitive comparison
+    $lower_username = $this->lower($username);
+
+    // user equals default config user / return username/password array to verify password or session login
+    if($this->lower(Config::get('username')) === $lower_username) return [
+      'username' => Config::get('username'),
+      'password' => Config::get('password')
+    ];
+
+    // exit it _files/users dir doesn't exist
+    if(!$this->users_dir()) return false;
+
+    // check if user config exists at _files/users/$username/config.php without making case-insensitive lookup
+    // this should apply in most cases when username is input in identical case or from $_SESSION['username']
+    // Mac OS will find user case-insensitive, but that's fine as it doesn't then matter how $_SESSION['username'] is stored
+    $user = $this->get_user_config($username);
+    if($user) return $user;
+
+    // loop user dirs and make case-insensitive username comparison
+    foreach (glob($this->users_dir() . '/*', GLOB_ONLYDIR|GLOB_NOSORT) as $dir) {
+      $arr = explode('/', $dir);  // get basename, better than basename() in case of multibyte chars
+      $dirname = end($arr);       // get basename, better than basename() in case of multibyte chars
+      // case-insensitive username matches user dir, get user config from $dirname with case in tact (for $_SESSION['username'])
+      if($lower_username === $this->lower($dirname)) return $this->get_user_config($dirname);
+    }
+  }
+
+  // get user config.php file for a specific user $dirname
+  private function get_user_config($dirname){
+    $user = U::uinclude("users/$dirname/config.php"); // return user config array
+    if(!$user) return; // exit if not found
+    // error if the user array does not contain password *required
+    if(empty($user['password'])) return $this->error('User does not have valid password');
+    // return user array merged with username, which is used for $_SESSION['login'] login_hash()
+    return array_replace($user, ['username' => $dirname]);
+  }
+
+  // creates a login hash unique for username/password/IP/user-agent/app-location
+  private function login_hash($user){
+    return md5($user['username'] . $user['password'] . $this->ip() . $this->server('HTTP_USER_AGENT') . __FILE__);
+  }
+
+  // compares strings with more secure hash_equals() function (PHP >= 5.6)
+  private function equals($secret, $user){
+    return function_exists('hash_equals') ? hash_equals($secret, $user) : $secret === $user;
+  }
+
+  // match passwords using password_verify() if password is encrypted else use plain equality matching for non-encrypted passwords
+  private function passwords_match($stored, $posted){
+    if(password_get_info($stored)['algoName'] === 'unknown') return $this->equals($stored, $posted);
+    return password_verify($posted, $stored);
+  }
+
+  // get client IP for login hash matching
   private function ip(){
     foreach(['HTTP_CLIENT_IP','HTTP_X_FORWARDED_FOR','HTTP_X_FORWARDED','HTTP_FORWARDED_FOR','HTTP_FORWARDED','REMOTE_ADDR'] as $key){
       $ip = explode(',', $this->server($key))[0];
@@ -299,31 +443,21 @@ class Login {
     return ''; // return empty string if nothing found
   }
 
-  // get $_SERVER parameters or empty string
+  // get $_SERVER parameters helpers
   private function server($str){
     return isset($_SERVER[$str]) ? $_SERVER[$str] : '';
   }
 
-  // check if user session is already logged in
-  private function is_logged_in(){
-
-    // false if session does not match
-    if(!isset($_SESSION['login']) || $_SESSION['login'] != $this->login_hash) return;
-
-    // logged in, if action is not logout
-    if(!U::get('logout')) return true;
-
-    // logout action, return false
-    $this->is_logout = true;
-    unset($_SESSION['login']);
-    return;
+  // lowercase username for case-insensitive username validation uses mb_strtolower() if function exists
+  private function lower($str){
+    return function_exists('mb_strtolower') ? mb_strtolower($str) : strtolower($str);
   }
 
-  // exit with error on ?action request (is not login attempt, and don't show login form)
-  private function unauthorized(){
+  // check if request is an action, in which case we return error instead of the form
+  private function action_request(){
 
-    // return to verify login if !action or action is tests
-    if(!U::get('action') || U::get('action') === 'tests') return;
+    // exit if !action (or action is "tests", which requires login from the form)
+    if(!U::get('action') || U::get('action') === 'tests') return false;
 
     // return json error if request is POST
     if($_SERVER['REQUEST_METHOD'] === 'POST') return Json::error('login');
@@ -332,74 +466,68 @@ class Login {
     U::error('Please <a href="' . strtok($_SERVER['REQUEST_URI'], '?') . '">login</a> to continue', 401);
   }
 
-  // verify a login attempt
-  private function verify_login(){
-
-    // false if client_hash from form does not match
-    if(U::post('client_hash') != $this->client_hash) return;
-
-    // false if sidmd5 from form does not match
-    if(U::post('sidmd5') != $this->sidmd5) return;
-
-    // false if username from form does not match
-    if($this->lower(trim(U::post('fusername'))) != $this->lower($this->username)) return;
-
-    // trim form password
-    $fpassword = trim(U::post('fpassword'));
-
-    // verify encrypted or non-encrypted or md5() match (legacy)
-    return password_verify($fpassword, $this->password) || $fpassword === $this->password || md5($fpassword) === $this->password;
-  }
-
-  // lowercase username for case-insensitive username validation uses mb_strtolower() if function exists
-  private function lower($str){
-    return function_exists('mb_strtolower') ? mb_strtolower($str) : strtolower($str);
-  }
-
   // login page / output form html and exit
-  private function form($login = false) {
+  private function form() {
+
+    // get form alert caused by logout, invalid session or incorrect login, before we destroy sessions vars
+    $alert = $this->get_form_alert();
+
+    // destroy login-specific session vars on logout or if they are invalid / session_unset()
+    foreach (['username', 'login'] as $key) unset($_SESSION[$key]);
+
+    // assign session token to match on login attempt for basic login security
+    if(!isset($_SESSION['token'])) $_SESSION['token'] = bin2hex(function_exists('random_bytes') ? random_bytes(32) : openssl_random_pseudo_bytes(32));
 
     // get login form page header
     U::html_header('Login', 'page-login');
 
-    // login page html / block basic bots by injecting form via javascript
+    // login page html
+    // block simple bots by injecting form via javascript, add action and method on submit
     ?><body class="page-login-body">
       <article class="login-container"></article>
     </body>
     <script>
-      document.querySelector('.login-container').innerHTML = '\
-      <h1>Login</h1>\
-      <?php echo $this->form_alert(); ?>
-      <form class="login-form">\
-        <input type="text" class="input" name="fusername" placeholder="Username" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">\
-        <input type="password" class="input" name="fpassword" placeholder="Password" required spellcheck="false" autocomplete="off">\
-        <input type="hidden" name="client_hash" value="<?php echo $this->client_hash; ?>">\
-        <input type="hidden" name="sidmd5" value="<?php echo $this->sidmd5; ?>">\
-        <button type="submit" class="button">Login</button>\
-      </form>';
+      const url = location.pathname + (location.search || '').replace(/(logout|login)=(1|true)(&?|$)/g, '').replace(/(\?|&)$/, '');
+      document.querySelector('.login-container').innerHTML = `
+      <h1>Login</h1>
+      <?php echo $alert; ?>
+      <form class="login-form">
+        <input type="text" class="input" name="fusername" placeholder="Username" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">
+        <input type="password" class="input" name="fpassword" placeholder="Password" required spellcheck="false" autocomplete="off">
+        <input type="hidden" name="token" value="<?php echo $_SESSION['token']; ?>">
+        <div class="login-form-buttons">
+          <?php if(!$this->has_public_login) echo '<a href="${ url }" class="button button-secondary login-cancel-button">Cancel</a>'; ?>
+          <button type="submit" class="button login-button">Login</button>
+        </div>
+      </form>`;
       document.querySelector('.login-form').addEventListener('submit', (e) => {
         document.body.classList.add('form-loading');
-        e.currentTarget.action = '<?php echo U::get('logout') ? strtok($_SERVER['REQUEST_URI'], '?') : $_SERVER['REQUEST_URI']; ?>';
+        e.currentTarget.action = url;
         e.currentTarget.method = 'post';
       }, false);
     </script>
     </html><?php exit; // end form and exit
   }
 
+  // get alert string for login form
+  private function alert($text, $type = 'danger'){
+    return '<div class="alert alert-' . $type . '" role="alert">' . $text . '</div>';
+  }
+
   // outputs an alert in login form on logout, incorrect login or session ID mismatch
-  private function form_alert(){
+  private function get_form_alert(){
 
-    // logout alert if was logout operation
-    if($this->is_logout) return '<div class="alert alert-warning" role="alert">You are now logged out</div>';
+    // ?logout=1 show logout text if was logged in
+    if(U::get('logout')) return isset($_SESSION['username']) ? $this->alert('You are now logged out', 'warning') : '';
 
-    // no alert if is not a login attempt
-    if(!U::post('sidmd5')) return '';
+    // must have been logged in, but session expired or username/password/IP/user-agent/app-location changed
+    if(isset($_SESSION['username'])) return $this->alert('You were logged out', 'warning'); // probably shouldn't happen
 
-    // sidmd5 does not match
-    if(U::post('sidmd5') !== $this->sidmd5) return '<div class="alert alert-danger" role="alert">PHP session ID mismatch</div>';
+    // failed login attempt, normally wrong username or password, although could be invalid login token
+    if(isset($_POST['fusername'])) return $this->alert('Incorrect login', 'danger');
 
-    // incorrect login alert
-    return '<div class="alert alert-danger" role="alert">Incorrect login</div>';
+    // no alert in form
+    return '';
   }
 }
 
@@ -560,7 +688,7 @@ class U {
   private static $image_resize_cache_direct;
   public static function image_resize_cache_direct(){
     if(isset(self::$image_resize_cache_direct)) return self::$image_resize_cache_direct;
-    return self::$image_resize_cache_direct = Config::get('image_resize_cache_direct') && !Config::$has_login && Config::get('load_images') && Config::get('image_resize_cache') && Config::get('image_resize_enabled') && Path::is_within_docroot(Config::$storagepath);
+    return self::$image_resize_cache_direct = Config::get('image_resize_cache_direct') && !Config::$is_logged_in && Config::get('load_images') && Config::get('image_resize_cache') && Config::get('image_resize_enabled') && Path::is_within_docroot(Config::$storagepath);
   }
 
   // image_resize_dimensions_retina (serve larger dimension resized images for HiDPI screens) with cached response
@@ -645,7 +773,7 @@ class U {
 
     // cache response headers
     if($cache){
-      $shared = Config::$has_login ? 'private' : 'public'; // private or shared cache depending on login
+      $shared = Config::$is_logged_in ? 'private' : 'public'; // private or shared cache depending on login
       header('expires: ' . gmdate('D, d M Y H:i:s \G\M\T', time() + self::$cache_time));
       header('cache-control: ' . $shared . ', max-age=' . self::$cache_time . ', s-maxage=' . self::$cache_time . ', immutable');
 
@@ -1560,7 +1688,7 @@ class Dir {
   // assign direct url to json cache file for faster loading from javascript / used by Dirs class (menu)
   private function set_json_cache_url(){
     // don't allow direct access if login or !public or !valid cache
-    if(Config::$has_login || !$this->cache_is_valid() || !Path::is_within_docroot(Config::$storagepath)) return;
+    if(Config::$is_logged_in || !$this->cache_is_valid() || !Path::is_within_docroot(Config::$storagepath)) return;
     $this->data['json_cache'] = Path::urlpath($this->cache_path);
   }
 
@@ -2248,6 +2376,15 @@ class Request {
     if(!is_array($this->params)) $this->error('Invalid parameters');
   }
 
+  // check if $action ios allowed
+  public function action_allowed(){
+    $c = 'allow_' . $this->action; // get allow_$action
+    if(!isset(Config::$config[$c])) return true; // allowed if allow_$action config option doesn't exit
+    // allow_all override allows all actions
+    if(Config::get('allow_all') && !in_array($this->action, ['check_updates', 'tests', 'tasks'])) return Config::$config[$c] = true;
+    return Config::get($c);
+  }
+
   // get request data parameters
   public function get_request_data(){
     if(!$this->is_post) return $_GET;
@@ -2366,7 +2503,7 @@ class Document {
     $mtime_count = filemtime(Config::$root);
     foreach ($root_dirs as $root_dir) $mtime_count += filemtime($root_dir);
     // create hash based on various parameters that may affect the menu
-    $this->menu_cache_hash =  substr(md5(Config::$document_root . Config::$__dir__ . Config::$root), 0, 6) . '.' . substr(md5(Config::$version . Config::get('cache_key') . Config::get('menu_max_depth') . Config::get('menu_load_all') . (Config::get('menu_load_all') ? Config::get('files_exclude') . U::image_resize_cache_direct() : '') . Config::$has_login . Config::get('dirs_exclude') . Config::get('menu_sort')), 0, 6) . '.' . $mtime_count;
+    $this->menu_cache_hash =  substr(md5(Config::$document_root . Config::$__dir__ . Config::$root), 0, 6) . '.' . substr(md5(Config::$version . Config::get('cache_key') . Config::get('menu_max_depth') . Config::get('menu_load_all') . (Config::get('menu_load_all') ? Config::get('files_exclude') . U::image_resize_cache_direct() : '') . Config::get('dirs_exclude') . Config::get('menu_sort')), 0, 6) . '.' . $mtime_count;
   }
 
   // get JSON menu_cache_file to forward to Javascript if menu_cache_validate is disabled
@@ -2504,7 +2641,8 @@ foreach (array_filter([
       'image_cache_hash' => $this->get_image_cache_hash(), // image cache hash to prevent expired cached/proxy images
       'image_resize_dimensions_retina' => U::image_resize_dimensions_retina(), // calculated retina
       'location_hash' => md5(Config::$root), // so JS can assume localStorage for relative paths like menu items open
-      'has_login' => Config::$has_login, // for logout interface
+      'is_logged_in' => Config::$is_logged_in, // for login/logout interface
+      'session_token' => isset($_SESSION['token']) ? $_SESSION['token'] : false, // if token is set, there is login (logged in or not)
       'version' => Config::$version, // forward version to JS
       'index_html' => intval(U::get('index_html')), // popuplated when index.html is published by plugins/files.tasks.php
       'server_exif' => function_exists('exif_read_data'), // so images can be oriented from exif orientation if detected
@@ -2518,7 +2656,7 @@ foreach (array_filter([
       'assets' => U::assetspath(), // calculated assets path (Javascript and CSS files from CDN or local)
       'watermark_files' => $this->get_watermark_files(), // get uploaded watermark files (font, image) from _files/watermark/*
       'ZipArchive_enabled' => class_exists('ZipArchive'), // required for zip and unzip functions on server
-      'upload_max_filesize' => $this->get_upload_max_filesize() // let the upload interface know upload_max_filesize
+      'upload_max_filesize' => $this->get_upload_max_filesize(), // let the upload interface know upload_max_filesize
     ]);
   }
 
@@ -2584,9 +2722,6 @@ setlocale(LC_ALL, 'en_US.UTF-8');
 // start new Config()
 new Config();
 
-// start new Login()
-if(Config::$has_login) new Login();
-
 // process actions ?action=
 if(U::get('action')){
 
@@ -2597,13 +2732,13 @@ if(U::get('action')){
   $action = $request->action;
 
   // only allow valid actions
-  if(!in_array($action, ['files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
+  if(!in_array($action, ['login', 'files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
 
   // check that request method matches action, so we can't make POST requests from GET / this should be improved
   if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
 
   // check if actions with config allow_{$ACTION} (most write actions) are allowed
-  if(isset(Config::$config['allow_' . $action]) && !Config::get('allow_' . $action)) $request->error("$action not allowed");
+  if(!$request->action_allowed()) $request->error("$action not allowed");
 
   // block all write actions in demo mode (that's what demo_mode option is for)
   if(Config::get('demo_mode') && in_array($action, ['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit', 'zip', 'unzip', 'move', 'copy'])) $request->error("$action not allowed in demo mode");
@@ -2985,6 +3120,10 @@ if(U::get('action')){
   // $_GET tasks plugin (for pre-caching or clearing cache, not official plugin yet ...)
   } else if($action === 'tasks'){
     if(!U::uinclude('plugins/files.tasks.php')) $request->error('Can\'t find tasks plugin', 404);
+
+  // login from within Files Gallery with fetch() return json success
+  } else if($action === 'login'){
+    Json::jexit(['success' => true]);
 
   // output PHP and server features by url ?action=tests / for diagnostics only
   } else if($action === 'tests'){
