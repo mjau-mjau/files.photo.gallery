@@ -1237,7 +1237,7 @@ class FileResponse {
     // get exec command string
     $cmd = str_replace(
       ['%APP_PATH%', '%PATH%', '%CACHE%'],
-      [$app_path, str_replace('"', '\"', $this->path), $cache],
+      [$app_path, escapeshellcmd($this->path), $cache],
       self::${"preview_cmd_$type"});
 
     // attempt to execute exec command
