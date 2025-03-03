@@ -2,7 +2,7 @@
 
 // CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
-return array (
+return [
   //'root' => '',
   //'root_url_path' => NULL,
   //'start_path' => false,
@@ -59,6 +59,7 @@ return array (
   //'allow_download' => true,
   //'allow_mass_download' => false,
   //'allow_mass_copy_links' => false,
+  //'allow_settings' => false,
   //'allow_check_updates' => false,
   //'allow_tests' => true,
   //'allow_tasks' => false,
@@ -73,4 +74,5 @@ return array (
   //'use_google_docs_viewer' => false,
   //'lang_default' => 'en',
   //'lang_auto' => true,
-);
+  //'index_cache' => false,
+];

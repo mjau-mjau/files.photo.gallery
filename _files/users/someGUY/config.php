@@ -1,14 +1,14 @@
 <?php
 
-// CONFIG / https://www.files.gallery/docs/config/
+// CONFIG / https://www.files.gallery/docs/config/z
 // Uncomment the parameters you want to edit.
-return array (
+return [
   'root' => './content',
   'start_path' => './content/someguy_startpath',
   //'username' => '',
-  'password' => '$2y$12$kIy/CEOq.NTTanslQj3BPe.VnJaTC68.50C7gwL0n2dmoMPCl2mtm',
+  'password' => '$2y$12$LVjq.zO/b4tfHaswRdZ9cu871wzgORIkiWYc//0re6dUSH7hVPn62',
   //'load_images' => false,
-  'menu_max_depth' => 3,
+  'menu_max_depth' => 4,
   'layout' => 'columns',
   'files_exclude' => '/\.php$/',
   'dirs_exclude' => '/^(filemanager|new demo stuff|test)($|\/)/',
@@ -32,4 +32,4 @@ return array (
   'upload_max_filesize' => 100000,
   //'lang_default' => 'ja',
   //'lang_auto' => false,
-);
+];

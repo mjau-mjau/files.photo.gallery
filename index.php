@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.11.0
+/* Files Gallery 0.12.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -88,6 +88,7 @@ class Config {
     'allow_download' => true,
     'allow_mass_download' => false,
     'allow_mass_copy_links' => false,
+    'allow_settings' => false,
     'allow_check_updates' => false,
     'allow_tests' => true,
     'allow_tasks' => false,
@@ -102,10 +103,11 @@ class Config {
     'use_google_docs_viewer' => false,
     'lang_default' => 'en',
     'lang_auto' => true,
+    'index_cache' => false,
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.11.0';   // Files Gallery version
+  public static $version = '0.12.0';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -117,7 +119,6 @@ class Config {
   public static $__file__;            // absolute __FILE__ path with normalized OS path
   public static $root;                // absolute root path interpolated from config root option, normally current dir
   public static $document_root;       // absolute server document root with normalized OS path
-  public static $is_logged_in;        // detect if user is logged in
   public static $created = [];        // checks what dirs and files get created by config on ?action=tests
 
   // config construct created static app vars and merge configs
@@ -126,6 +127,11 @@ class Config {
     // get absolute __DIR__ and __FILE__ paths with normalized OS paths
     self::$__dir__ = Path::realpath(__DIR__);
     self::$__file__ = Path::realpath(__FILE__);
+
+    // install.php - allow edit settings and create users from interface temporarily when file is named "install.php"
+    // useful when installing Files Gallery, allows editing settings and creating users without having to modify config.php manually
+    // remember to rename the file back to index.php once you have edited settings and/or created users.
+    if(U::basename(__FILE__) === 'install.php') self::$default['allow_settings'] = true;
 
     // load local config _filesconfig.php if exists
     self::$localconfig = $this->load(self::$localconfigpath);
@@ -139,6 +145,9 @@ class Config {
     // at this point we must check if login is required or user is already logged in, and then merge user config
     new Login();
 
+    // shortcut option `allow_all` allows all file actions (except settings, check_updates, tests, tasks)
+    if(self::get('allow_all')) foreach (['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit', 'zip', 'unzip', 'move', 'copy', 'download', 'mass_download', 'mass_copy_links'] as $k) self::$config['allow_'.$k] = true;
+
     // assign public real root path
     self::$root = Path::realpath(self::get('root'));
 
@@ -150,9 +159,6 @@ class Config {
 
     // get server document root with normalized OS path
     self::$document_root = Path::realpath($_SERVER['DOCUMENT_ROOT']);
-
-    // assign public $is_logged_in if username or password or X3 login (plugin)
-    self::$is_logged_in = self::get('username') || self::get('password');// || X3::login();
   }
 
   // public shortcut function to get config option Config::get('option')
@@ -236,7 +242,7 @@ class Config {
     $save = array_intersect_key(array_replace(self::$storageconfig, $options), self::$default);
 
     // create exported array string with save values merged into default values, all commented out
-    $export = preg_replace("/  '/", "  //'", var_export(array_replace(self::$default, $save), true));
+    $export = preg_replace("/  '/", "  //'", U::var_export(array_replace(self::$default, $save)));
 
     // loop save options and un-comment options where values differ from default options (for convenience, only store differences)
     foreach ($save as $key => $value) if($value !== self::$default[$key]) $export = str_replace("//'" . $key, "'" . $key, $export);
@@ -250,47 +256,64 @@ class Config {
 class Login {
 
   // vars
-  private $user; // config array for logged in user, will merge with main config
-  private $has_public_login; // public (default config) login exists / in this case, login is required
+  private $user;                    // config array for logged in user, will merge with main config
+  public static $is_logged_in;      // user is logged in flag
+  public static $has_public_login;  // public (default config) login exists / in this case, login is required
+  public static $is_default_user;   // is default config user (login by username and password from default config.php)
 
   // start new login check process
   public function __construct() {
 
     // public (default config) login exists / in this case, login is required / also check X3:login() plugin
-    $this->has_public_login = Config::get('username') && Config::get('password') ? true : X3::login();
+    self::$has_public_login = Config::get('username') && Config::get('password') ? true : X3::login();
 
     // check if there is any login, from default config or users, so we can check session and login attempt or show login form
-    if(!$this->has_public_login && !$this->users_dir()){
+    if(!self::$has_public_login && !self::users_dir()){
       // unset session token in case it remains in any active session for some reason (probably shouldn't happen)
       if(isset($_SESSION['token'])) unset($_SESSION['token']);
       return;
     }
 
+    // un-comment below to increase login session cookie lifetime to 24 hours (or change it)
+    // session_set_cookie_params(86400);
+
     // PHP session_start() or error
     // check active sessions, session token on login attempt or assign session token on login form
     if(session_status() === PHP_SESSION_NONE && !session_start()) U::error('Failed to initiate PHP session_start()', 500);
 
-    // check if browser is already logged in by session
-    if($this->is_logged_in()){
-      // allow ?logout=1 only if user is already logged in
-      if(U::get('logout')) return $this->form();
-      // merge user config and continue
-      return $this->login();
-    }
+    // un-comment below to attempt to extend session timeout in browser and server
+    // setcookie(session_name(), session_id(), time() + 3600); // default 0, means logout on browser session (window close)
+    // ini_set('session.gc_maxlifetime', '3600'); // default '1440'
 
-    // ?login=1 displays login form, if user is not already logged in
-    // this only applies when login is not required !$this->has_public_login, else the login form will always display
-    if(U::get('login')) return $this->form();
+    // assign CSRF security $_SESSION['token'] / used in login form to compare with login attempt, and forwarded to the app (JS) so it knows there is login / could be used in all action requests also, but I see the point in that
+    $this->set_session_token();
 
     // detect $_POST login attempt
     if($this->is_login_attempt()) {
 
-      // on successful login, merge user config and continue
+      // on successful login, merge user config and login
       if($this->is_successful_login()) return $this->login();
 
-    // if default config is without login, serve request without login
-    } else if(!$this->has_public_login){
-      return;
+    // check if browser is already logged in by session
+    } else if($this->is_logged_in()){
+
+      // allow ?logout=1 parameter only use user is already logged in
+      if(U::get('logout')) return $this->form();
+
+      // merge user config and login
+      return $this->login();
+
+    // if not logged in and default config does not require login (no username or password)
+    } else if(!self::$has_public_login) {
+
+      // ?login=1 displays login form when default config does not require login
+      if(U::get('login')) {
+
+        // remove $_SESSION['username'] just in case user was removed while session remains
+        if(isset($_SESSION['username'])) unset($_SESSION['username']);
+
+      // serve request without login if default config does not require login
+      } else return;
     }
 
     // return error if request is an action (don't display login form)
@@ -301,8 +324,14 @@ class Login {
   }
 
   // check if _files/users dir exists and return path
-  private function users_dir(){
+  public static function users_dir(){
     return Config::$storagepath && file_exists(Config::$storagepath . '/users') ? Config::$storagepath . '/users' : false;
+  }
+
+  // assign CSRF security $_SESSION['token']
+  private function set_session_token(){
+    if(isset($_SESSION['token'])) return; // token already set
+    $_SESSION['token'] = bin2hex(function_exists('random_bytes') ? random_bytes(32) : openssl_random_pseudo_bytes(32));
   }
 
   // check if user is already logged in by session
@@ -369,7 +398,11 @@ class Login {
       'storage_path',                     // storage path is always global and must be defined in main config
       'video_ffmpeg_path',                // should be in global config
       'imagemagick_path',                 // should be in global config
+      'index_cache',                      // should be global config / not avaialble for logged in users anyway
     ];
+
+    // we are hereby logged in
+    self::$is_logged_in = true;
 
     // merge user config into config object
     Config::$config = array_replace(Config::$config, array_diff_key($this->user, array_flip($user_exclude)));
@@ -385,13 +418,16 @@ class Login {
     $lower_username = $this->lower($username);
 
     // user equals default config user / return username/password array to verify password or session login
-    if($this->lower(Config::get('username')) === $lower_username) return [
-      'username' => Config::get('username'),
-      'password' => Config::get('password')
-    ];
+    if($this->lower(Config::get('username')) === $lower_username) {
+      self::$is_default_user = true; // is default config user
+      return [
+        'username' => Config::get('username'),
+        'password' => Config::get('password')
+      ];
+    }
 
     // exit it _files/users dir doesn't exist
-    if(!$this->users_dir()) return false;
+    if(!self::users_dir()) return false;
 
     // check if user config exists at _files/users/$username/config.php without making case-insensitive lookup
     // this should apply in most cases when username is input in identical case or from $_SESSION['username']
@@ -400,7 +436,7 @@ class Login {
     if($user) return $user;
 
     // loop user dirs and make case-insensitive username comparison
-    foreach (glob($this->users_dir() . '/*', GLOB_ONLYDIR|GLOB_NOSORT) as $dir) {
+    foreach (glob(self::users_dir() . '/*', GLOB_ONLYDIR|GLOB_NOSORT) as $dir) {
       $arr = explode('/', $dir);  // get basename, better than basename() in case of multibyte chars
       $dirname = end($arr);       // get basename, better than basename() in case of multibyte chars
       // case-insensitive username matches user dir, get user config from $dirname with case in tact (for $_SESSION['username'])
@@ -475,59 +511,113 @@ class Login {
     // destroy login-specific session vars on logout or if they are invalid / session_unset()
     foreach (['username', 'login'] as $key) unset($_SESSION[$key]);
 
-    // assign session token to match on login attempt for basic login security
-    if(!isset($_SESSION['token'])) $_SESSION['token'] = bin2hex(function_exists('random_bytes') ? random_bytes(32) : openssl_random_pseudo_bytes(32));
-
     // get login form page header
     U::html_header('Login', 'page-login');
 
-    // login page html
-    // block simple bots by injecting form via javascript, add action and method on submit
-    ?><body class="page-login-body">
-      <article class="login-container"></article>
-    </body>
+    // login page html / check language and render form via javascript (blocks simple bots)
+    ?><body class="page-login-body body-loading"></body>
     <script>
-      const url = location.pathname + (location.search || '').replace(/(logout|login)=(1|true)(&?|$)/g, '').replace(/(\?|&)$/, '');
-      document.querySelector('.login-container').innerHTML = `
-      <h1>Login</h1>
-      <?php echo $alert; ?>
-      <form class="login-form">
-        <input type="text" class="input" name="fusername" placeholder="Username" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">
-        <input type="password" class="input" name="fpassword" placeholder="Password" required spellcheck="false" autocomplete="off">
-        <input type="hidden" name="token" value="<?php echo $_SESSION['token']; ?>">
-        <div class="login-form-buttons">
-          <?php if(!$this->has_public_login) echo '<a href="${ url }" class="button button-secondary login-cancel-button">Cancel</a>'; ?>
-          <button type="submit" class="button login-button">Login</button>
-        </div>
-      </form>`;
-      document.querySelector('.login-form').addEventListener('submit', (e) => {
-        document.body.classList.add('form-loading');
-        e.currentTarget.action = url;
-        e.currentTarget.method = 'post';
-      }, false);
+
+    // get search parameter
+    const search = location.search || '';
+
+    // get action submit url but remove ?login and ?logout parameters
+    const url = location.pathname + search.replace(/(logout|login)=(1|true)(&?|$)/g, '').replace(/(\?|&)$/, '') + location.hash;
+
+    // history replace ?logout=1 in url to prevent navigating to ?logout=1 from browser back button
+    if(search.match(/logout=(1|true)/)) history.replaceState(null, '', url);
+
+    // Javascript Login class checks language and renders form
+    class Login {
+
+      // available languages
+      langs = ['ar', 'bg', 'cs', 'da', 'de', 'en', 'el', 'es', 'et', 'fi', 'fr', 'hu', 'id', 'it', 'ja', 'ko', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'th', 'tr', 'uk', 'zh'];
+
+      // language object empty (English) by default
+      lang = {};
+
+      // render form
+      render(lang){
+
+        // re-assign lang object if lang loaded or assigned from localStorage
+        if(lang) this.lang = lang;
+
+        // remove loading speinner
+        document.body.classList.remove('body-loading');
+
+        // inject form
+        document.body.insertAdjacentHTML('afterBegin', `
+        <article class="login-container">
+          <h1 class="login-header">${ this.getlang('login') }</h1>
+          <?php echo $alert; ?>
+          <form class="login-form" onsubmit="document.body.classList.add('form-loading')" method="post" action="${ url }">
+            <input type="text" class="input" name="fusername" placeholder="${ this.getlang('username') }" required autofocus spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off">
+            <input type="password" class="input" name="fpassword" placeholder="${ this.getlang('password') }" required spellcheck="false" autocomplete="off">
+            <input type="hidden" name="token" value="<?php echo $_SESSION['token']; ?>">
+            <div class="login-form-buttons">
+              <button type="submit" class="button login-button">${ this.getlang('login') }</button>
+              <?php if(!self::$has_public_login) { ?><a href="${ url }" class="button button-secondary login-cancel-button" onclick="document.body.classList.add('form-loading')">${ this.getlang('cancel') }</a><?php } ?>
+            </div>
+          </form>
+        </article>`);
+      }
+
+      // get language text Capitalized
+      getlang(str){
+        let s = this.lang[str] || str;
+        return s[0].toUpperCase() + s.slice(1);
+      }
+
+      // login constructor, get language then render form
+      constructor(){
+
+        // get ?lang= url parameter
+        let param = 'URLSearchParams' in window ? new URLSearchParams(location.search).get('lang') : 0;
+
+        // get language code from 1. url param ?lang=xX, 2. localStorage, 3. navigator.languages[], 4. lang_default, 5. English
+        let lang_code = [
+          param,
+          param !== 'reset' ? storage('files:lang:current') : 0,
+          <?php if(Config::get('lang_auto')) { ?>...(navigator.languages ? navigator.languages : [navigator.language || '']).map(l => l.toLowerCase().split('-')[0]),<?php } ?>
+          '<?php echo Config::get('lang_default'); ?>'
+        ].find(l => l && this.langs.includes(l)) || 'en';
+
+        // render form if language is English
+        if(lang_code === 'en') return this.render();
+
+        // check if we have language already loaded into localStorage / try-catch in case localStorage is not json
+        let local = storage(`files:lang:${ lang_code }`);
+        if(local) try { return this.render(JSON.parse(local)) } catch (e) {};
+
+        // load json language file and render form with loaded language file / on error, render default English
+        fetch(`<?php echo U::assetspath() ?>files.photo.gallery@<?php echo Config::$version ?>/lang/${ lang_code }.json`)
+          .then(response => response.ok ? response.json() : 0)
+          .then(json => {
+            this.render(json);
+            if(json) storage(`files:lang:${ lang_code }`, JSON.stringify(json));
+          }).catch(e => this.render());
+      }
+    }
+
+    // start login load language and render form
+    new Login();
     </script>
     </html><?php exit; // end form and exit
   }
 
   // get alert string for login form
   private function alert($text, $type = 'danger'){
-    return '<div class="alert alert-' . $type . '" role="alert">' . $text . '</div>';
+    return '<div class="alert alert-' . $type . '" role="alert">${ this.getlang("' . $text . '") }</div>';
   }
 
   // outputs an alert in login form on logout, incorrect login or session ID mismatch
   private function get_form_alert(){
 
-    // ?logout=1 show logout text if was logged in
-    if(U::get('logout')) return isset($_SESSION['username']) ? $this->alert('You are now logged out', 'warning') : '';
-
-    // must have been logged in, but session expired or username/password/IP/user-agent/app-location changed
-    if(isset($_SESSION['username'])) return $this->alert('You were logged out', 'warning'); // probably shouldn't happen
-
     // failed login attempt, normally wrong username or password, although could be invalid login token
-    if(isset($_POST['fusername'])) return $this->alert('Incorrect login', 'danger');
+    if(isset($_POST['fusername'])) return $this->alert('invalid login', 'danger');
 
-    // no alert in form
-    return '';
+    // logged out by ?logout=1 or cookie/session expired or username/password/IP/user-agent/app-location changed
+    return isset($_SESSION['username']) ? $this->alert('you were logged out', 'warning') : '';
   }
 }
 
@@ -688,7 +778,7 @@ class U {
   private static $image_resize_cache_direct;
   public static function image_resize_cache_direct(){
     if(isset(self::$image_resize_cache_direct)) return self::$image_resize_cache_direct;
-    return self::$image_resize_cache_direct = Config::get('image_resize_cache_direct') && !Config::$is_logged_in && Config::get('load_images') && Config::get('image_resize_cache') && Config::get('image_resize_enabled') && Path::is_within_docroot(Config::$storagepath);
+    return self::$image_resize_cache_direct = Config::get('image_resize_cache_direct') && !Login::$is_logged_in && Config::get('load_images') && Config::get('image_resize_cache') && Config::get('image_resize_enabled') && Path::is_within_docroot(Config::$storagepath);
   }
 
   // image_resize_dimensions_retina (serve larger dimension resized images for HiDPI screens) with cached response
@@ -705,13 +795,20 @@ class U {
   <!doctype html><!-- www.files.gallery -->
   <html class="<?php echo $class; ?>" data-theme="contrast">
     <script>
-    let theme = (() => {
+
+    // fail-safe localStorage helper function
+    function storage(item, val) {
       try {
-        return localStorage.getItem('files:theme');
+        return val ? localStorage.setItem(item, val) : localStorage.getItem(item);
       } catch (e) {
         return false;
       };
-    })() || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'contrast');
+    }
+
+    // get theme from localStorage or system default
+    let theme = storage('files:theme') || (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'contrast');
+
+    // if theme is not 'contrast' (default theme) then must data-theme in <html>
     if(theme !== 'contrast') document.documentElement.dataset.theme = theme;
     </script>
     <head>
@@ -721,9 +818,12 @@ class U {
       <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAD1BMVEUui1f///9jqYHr9O+fyrIM/O8AAAABIklEQVR42u3awRGCQBBE0ZY1ABUCADQAoEwAzT8nz1CyLLszB6p+B8CrZuDWujtHAAAAAAAAAAAAAAAAAACOQPPp/2Y0AiZtJNgAjTYzmgDtNhAsgEkyrqDkApkVlsBDsq6wBIY4EIqBVuYVFkC98/ycCkr8CbIr6MCNsyosgJvsKxwFQhEw7APqY3mN5cBOnt6AZm/g6g2o8wYqb2B1BQcgeANXb0DuwOwNdKcHLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeA20mArmB6Ugg0NsCcP/9JS8GAKSlVZMBk8p1GRgM2R4jMHu51a/2G1ju7wfoNrYHyCtUY3zpOthc4MgdNy3N/0PruC/JlVAwAAAAAAAAAAAAAAABwZuAHuVX4tWbMpKYAAAAASUVORK5CYII=">
       <meta name="mobile-web-app-capable" content="yes">
       <title><?php echo $title; ?></title>
-      <?php U::uinclude('include/head.html'); ?>
       <link href="<?php echo U::assetspath(); ?>files.photo.gallery@<?php echo Config::$version ?>/css/files.css" rel="stylesheet">
-      <?php U::uinclude('css/custom.css'); ?>
+      <?php // various custom includes
+      U::uinclude('include/head.html');
+      U::uinclude('css/custom.css');
+      if(Login::$is_logged_in && !Login::$is_default_user) U::uinclude('users/' . Config::get('username') . '/css/custom.css');
+      ?>
     </head>
   <?php
   }
@@ -773,7 +873,7 @@ class U {
 
     // cache response headers
     if($cache){
-      $shared = Config::$is_logged_in ? 'private' : 'public'; // private or shared cache depending on login
+      $shared = Login::$is_logged_in ? 'private' : 'public'; // private or shared cache depending on login
       header('expires: ' . gmdate('D, d M Y H:i:s \G\M\T', time() + self::$cache_time));
       header('cache-control: ' . $shared . ', max-age=' . self::$cache_time . ', s-maxage=' . self::$cache_time . ', immutable');
 
@@ -790,6 +890,58 @@ class U {
 
     // assign content-disposition when reading files on disk, assigned to either 'inline' or 'attachment'
     if($disposition) header('content-disposition: ' . $disposition . '; filename="' . addslashes($filename) . '"');
+  }
+
+  // save config file, validate array, check root and encrypt password
+  public static function save_config_file($dir, $data, $check_pass = false){
+
+    // some minimal validation on the config data before attempting to save
+    if(@preg_match_all("/^<\?php|return|password/", $data) < 3) return Json::error('Invalid user config');
+
+    //
+    $test_file = "$dir/test.php";
+
+    // must be able to save test config
+    if(!@file_put_contents($test_file, $data)) return Json::error('Failed to write user config');
+
+    // get test file array
+    try {
+      $test = @include $test_file;
+    } catch (Exception $e) {
+      @unlink($test_file);
+      return Json::error('Invalid config');
+    }
+
+    // silently delete the test file
+    @unlink($test_file);
+
+    // validate as array
+    if(!is_array($test)) return Json::error('Invalid config');
+
+    // validate root dir
+    if(!empty($test['root']) && !is_dir($test['root'])) return Json::error('Invalid root dir');
+
+    // password must exist
+    if($check_pass && empty($test['password'])) return Json::error('Config must contain a password');
+
+    // encrypt password / automatically encrypt passwords / bypass by saving passwords inside "double-quotes"
+    if(!empty($test['password']) && password_get_info($test['password'])['algoName'] === 'unknown'){
+      // hash and escape single-quotes for insert into array
+      $hashed = str_replace("'", '\'', password_hash($test['password'], PASSWORD_DEFAULT));
+      // replace password
+      $data = str_replace('%PASS%', "'password' => '$hashed'" , preg_replace("/'password'\s?=>\s?'(.+)'/", '%PASS%', $data));
+    }
+
+    // save config.php
+    if(!@file_put_contents("$dir/config.php", $data)) return Json::error('Failed to write config file');
+
+    // return data
+    return $data;
+  }
+
+  // var_export response with [] instead of array () / used for automatic config.php creation and ?tests=1 output
+  public static function var_export($arr){
+    return rtrim(str_replace('array (', '[', var_export($arr, true)), ')') . ']';
   }
 }
 
@@ -1143,7 +1295,7 @@ class Tests {
 
   // outputs and formats a property feature <div> element to html
   private function prop($name, $success = 'neutral', $value = ''){
-    $class = is_string($success) ? $success : ($success ? ' success' : 'fail');
+    $class = is_string($success) ? $success : ($success ? 'success' : 'fail');
     $this->html .= "<div class=\"test $class\">$name <b>$value</b></div>";
   }
 
@@ -1154,10 +1306,10 @@ class Tests {
     $arr = Config::$config;
 
     // mask sensitive values
-    foreach (['root', 'storage_path', 'start_path', 'username', 'password', 'license_key', 'allow_tasks'] as $prop) if($arr[$prop]) $arr[$prop] = '***';
+    foreach (['root', 'storage_path', 'start_path', 'username', 'password', 'license_key', 'allow_tasks', 'index_cache', 'files_exclude', 'dirs_exclude'] as $prop) if($arr[$prop]) $arr[$prop] = '***';
 
     // create PHP array string that resembles config.php files
-    $php = '<?php' . PHP_EOL . PHP_EOL . 'return ' . var_export($arr, true) . ';';
+    $php = '<?php' . PHP_EOL . PHP_EOL . 'return ' . U::var_export($arr) . ';';
 
     // add to html response and highlight
     $this->html .= '<h2>Config</h2>' . highlight_string($php, true);
@@ -1237,7 +1389,7 @@ class FileResponse {
     // get exec command string
     $cmd = str_replace(
       ['%APP_PATH%', '%PATH%', '%CACHE%'],
-      [$app_path, str_replace('"', '\"', $this->path), $cache],
+      [$app_path, escapeshellcmd($this->path), $cache],
       self::${"preview_cmd_$type"});
 
     // attempt to execute exec command
@@ -1688,7 +1840,7 @@ class Dir {
   // assign direct url to json cache file for faster loading from javascript / used by Dirs class (menu)
   private function set_json_cache_url(){
     // don't allow direct access if login or !public or !valid cache
-    if(Config::$is_logged_in || !$this->cache_is_valid() || !Path::is_within_docroot(Config::$storagepath)) return;
+    if(Login::$is_logged_in || !$this->cache_is_valid() || !Path::is_within_docroot(Config::$storagepath)) return;
     $this->data['json_cache'] = Path::urlpath($this->cache_path);
   }
 
@@ -2376,15 +2528,6 @@ class Request {
     if(!is_array($this->params)) $this->error('Invalid parameters');
   }
 
-  // check if $action ios allowed
-  public function action_allowed(){
-    $c = 'allow_' . $this->action; // get allow_$action
-    if(!isset(Config::$config[$c])) return true; // allowed if allow_$action config option doesn't exit
-    // allow_all override allows all actions
-    if(Config::get('allow_all') && !in_array($this->action, ['check_updates', 'tests', 'tasks'])) return Config::$config[$c] = true;
-    return Config::get($c);
-  }
-
   // get request data parameters
   public function get_request_data(){
     if(!$this->is_post) return $_GET;
@@ -2396,8 +2539,9 @@ class Request {
   // get specific string value parameter from data (dir, file path etc)
   public function param($param){
     if(!isset($this->params[$param])) return false;
-    if(!is_string($this->params[$param])) $this->error("Invalid $param parameter"); // must be string if exists
-    return trim($this->params[$param]); // trim it
+    //$p = $this->params[$param];
+    //if(!is_string($p) || !is_bool($p)) $this->error("Invalid $param parameter"); // must be string if exists
+    return is_string($this->params[$param]) ? trim($this->params[$param]) : $this->params[$param]; // trim it
   }
 
   // error response based on request type / 400 Bad Request default / 401, 403, 404, 500
@@ -2411,12 +2555,13 @@ class Request {
 class Document {
 
   // private Document class vars
-  private $start_path = ''; // start_path extracted and validated from query or $config['start_path']
+  private $start_path = '';             // start_path extracted and validated from query or $config['start_path']
   private $absolute_start_path = false; // absolute path of start_path, for validation and dirs preload
-  private $dirs = []; // array of dirs to be preloaded, normally root and query or start_path (if not same as root)
-  private $menu_exists = false; // determines if menu exists from config and checks for dirs in root
-  private $menu_cache_hash = false; // assign a menu cache hash so menu cache can be validated on load
-  private $menu_cache_file = false; // assign direct access to menu json cache file when menu_cache_validate is disabled
+  private $dirs = [];                   // array of dirs to be preloaded, normally root and query or start_path (if not same as root)
+  private $menu_exists = false;         // determines if menu exists from config and checks for dirs in root
+  private $menu_cache_hash = false;     // assign a menu cache hash so menu cache can be validated on load
+  private $menu_cache_file = false;     // assign direct access to menu json cache file when menu_cache_validate is disabled
+  private $index_html = false;          // timestamp when index_cache is used to create index.html
 
   // document construct tasks
   public function __construct(){
@@ -2468,6 +2613,7 @@ class Document {
 
   // parse query_string and get first ?parameter to be considered path
   private function get_query_path(){
+    if($this->index_html) return; // exit if we are generating index.html index_cache, as query will be manageg by javascript
     if(empty($_SERVER['QUERY_STRING'])) return; // exit if !QUERY_STRING
     $path = explode('&', $_SERVER['QUERY_STRING'])[0]; // get first parameter in QUERY_STRING for path
     if(!$path || strpos($path, '=') !== false) return; // make sure path exists and is not assigned parameter=value
@@ -2518,16 +2664,43 @@ class Document {
     if($url_path) $this->menu_cache_file = $url_path . '?' . filemtime($path);
   }
 
+  // start index.html index_cache if enabled and assigned by url parameter ?create_index_cache=passphrase
+  private function start_index_cache(){
+    // check ?create_index_cache=passphrase matches config index_cache passphrase
+    if(Config::get('index_cache') !== TRUE && U::get('create_index_cache') !== Config::get('index_cache')) U::error('Incorrect passphrase for index_cache');
+    // index_cache does not work if login is required
+    if(Login::$has_public_login) U::error('Config index_cache can\'t be used when login is required');
+    // index_cache can only be created from non-logged in user (must create a public accessible html page)
+    if(Login::$is_logged_in) U::error("You must <a href=\"?logout=1&create_index_cache=$create_index_cache\">logout</a> to generate index_cache");
+    // assign index_html as a unique timestamp
+    $this->index_html = time();
+    // start output buffering
+    ob_start();
+    // add HTML comment at top of document so we can easily recognize if response is cached index.html
+    echo "<!-- index_html $this->index_html -->";
+  }
+
+  // save index_cache index.html and exit
+  private function save_index_cache(){
+    // save index.html with current buffer response
+    $success = file_put_contents('./index.html', ob_get_clean());
+    // output success message and exit
+    exit(($success ? 'Created' : 'Failed to create') . ' <a href=".">index.html</a> index_cache ' . $this->index_html);
+  }
+
   // output main Files Gallery document HTML
   private function HTML(){
 
     // main document, output version, request time and memory
     U::header('Version ' . Config::$version);
 
+    // start index.html index_cache if enabled and assigned by url parameter ?create_index_cache=passphrase
+    if(Config::get('index_cache') && U::get('create_index_cache')) $this->start_index_cache();
+
     // main document html start
     U::html_header($this->start_path ? U::basename($this->start_path) : './', 'menu-' . ($this->menu_exists ? 'enabled' : 'disabled sidebar-closed'));
     ?>
-    <body class="body-loading">
+    <body class="body-loading"<?php if(Login::$is_logged_in) echo ' data-username="' . htmlspecialchars(Config::get('username')) . '"'; ?>>
       <main id="main">
         <nav id="topbar" class="topbar-sticky">
           <div id="topbar-top">
@@ -2586,6 +2759,10 @@ foreach (array_filter([
   'files.photo.gallery@' . Config::$version . '/js/files.js'
 ]) as $key) echo '<script src="' . U::assetspath() . $key . '"></script>' . PHP_EOL;
 ?></body></html><?php
+
+  // if index_html (index_cache), save index.html and exit
+  if($this->index_html) $this->save_index_cache();
+
   // end HTML
   }
 
@@ -2622,6 +2799,7 @@ foreach (array_filter([
       'image_resize_dimensions_allowed',
       'download_dir_cache',
       'imagemagick_path',
+      'index_cache'
     ];
 
     // create config array without excluded items
@@ -2641,10 +2819,12 @@ foreach (array_filter([
       'image_cache_hash' => $this->get_image_cache_hash(), // image cache hash to prevent expired cached/proxy images
       'image_resize_dimensions_retina' => U::image_resize_dimensions_retina(), // calculated retina
       'location_hash' => md5(Config::$root), // so JS can assume localStorage for relative paths like menu items open
-      'is_logged_in' => Config::$is_logged_in, // for login/logout interface
-      'session_token' => isset($_SESSION['token']) ? $_SESSION['token'] : false, // if token is set, there is login (logged in or not)
+      'is_logged_in' => Login::$is_logged_in, // for login/logout interface
+      'username' => Login::$is_logged_in ? Config::get('username') : false, // username if logged in, for settings interface
+      'has_public_login' => Login::$has_public_login,
+      'session_token' => !$this->index_html && isset($_SESSION['token']) ? $_SESSION['token'] : false, // token means there is login
       'version' => Config::$version, // forward version to JS
-      'index_html' => intval(U::get('index_html')), // popuplated when index.html is published by plugins/files.tasks.php
+      'index_html' => $this->index_html, // timestamp when is index.html created from index_cache option
       'server_exif' => function_exists('exif_read_data'), // so images can be oriented from exif orientation if detected
       'image_resize_memory_limit' => $this->get_image_resize_memory_limit(), // so JS can calculate what images can be resized
       'md5' => $this->get_md5('6c6963656e73655f6b6579'), // calculate md5 hash
@@ -2732,13 +2912,13 @@ if(U::get('action')){
   $action = $request->action;
 
   // only allow valid actions
-  if(!in_array($action, ['login', 'files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
+  if(!in_array($action, ['ping', 'settings', 'login', 'files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
 
   // check that request method matches action, so we can't make POST requests from GET / this should be improved
   if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
 
-  // check if actions with config allow_{$ACTION} (most write actions) are allowed
-  if(!$request->action_allowed()) $request->error("$action not allowed");
+  // make sure actions with config allow_{$action} (most write actions) are allowed
+  if(isset(Config::$config['allow_' . $action]) && !Config::$config['allow_' . $action]) $request->error("$action not allowed");
 
   // block all write actions in demo mode (that's what demo_mode option is for)
   if(Config::get('demo_mode') && in_array($action, ['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit', 'zip', 'unzip', 'move', 'copy'])) $request->error("$action not allowed in demo mode");
@@ -3124,6 +3304,83 @@ if(U::get('action')){
   // login from within Files Gallery with fetch() return json success
   } else if($action === 'login'){
     Json::jexit(['success' => true]);
+
+  // Login ping / checks if user is still logged in, shows login form or logs out
+  } else if($action === 'ping'){
+
+    // [experimental] un-comment the below to extend session cookie lifetime on each ping, if you are being logged out prematurely
+    // setcookie(session_name(), session_id(), time() + 3600); // 3600 seconds / 1 hour (becomes arbitrary)
+
+    // send username and session_token for app to check if we are still logged in to the same user and session
+    Json::jexit([
+      'username' => Config::get('username'), // username will return empty if was logged out to public non-login version
+      'session_token' => isset($_SESSION['token']) ? $_SESSION['token'] : false,
+    ]);
+
+  // settings / load settings and users / save, edit, create new users
+  } else if($action === 'settings'){
+
+    // storage path `_files` must exist at this point if we are going to load, edit, create or delete any config
+    if(!Config::$storagepath) return Json::error('Storage path does not exist');
+
+    // LOAD users
+    if($request->param('load')) {
+
+      // start users array with default config first
+      $users = ['default' => @file_get_contents(Config::$storageconfigpath) ?: ''];
+
+      // get users dir
+      $users_dir = Login::users_dir();
+
+      // loop user dirs and get configs
+      if($users_dir) foreach (glob("$users_dir/*", GLOB_ONLYDIR) as $dir) {
+        $users[U::basename($dir)] = @file_get_contents("$dir/config.php") ?: '';
+      }
+
+      // return user array with configs
+      return Json::jexit($users);
+    }
+
+    // block all settings write actions in demo mode
+    if(Config::get('demo_mode')) $request->error("Action not allowed in demo mode");
+
+    // create local $short vars from config 'image_resize_*' options, because it's much easier and more readable
+    foreach (['username', 'new_name', 'is_new', 'is_rename', 'is_default', 'data', 'remove'] as $k) $$k = $request->param($k);
+
+    // if is default _files/config/config.php, save and return with doing further checks
+    if($is_default) return Json::jexit(['success' => true, 'data' => U::save_config_file(Config::$storagepath . '/config', $data)]);
+
+    // $username must be set and not equal default
+    if(!$username || strtolower($username) === 'default') return Json::error('Invalid username' . ($username ? " '$username'" : ''));
+
+    // if new_name (new user or renamed user) check if name is allowed (we don't need to check existing usernames)
+    if($new_name && !Filemanager::name_is_allowed($new_name)) return Json::error('Invalid username');
+
+    // config path vars
+    $users_dir = Config::$storagepath . '/users';
+    $user_dir =  "$users_dir/$username";
+    $user_dir_new = $new_name ? "$users_dir/$new_name" : false;
+
+    // make sure config already exists unless is new user
+    if(!$is_new && !file_exists("$user_dir/config.php")) return Json::error('Username does not exist');
+
+    // REMOVE / Remove dir and return
+    if($remove) return Json::jexit(['success' => !!Filemanager::delete($user_dir)]);
+
+    // if new user or rename, make sure dir doesn't already exist
+    if($new_name && file_exists($user_dir_new)) return Json::error('Username already exists');
+
+    // create user dir if is new user
+    if($is_new && !@mkdir($user_dir_new, 0777, true)) return Json::error('Failed to create user dir');
+
+    // validate and save config.php file
+    $data = U::save_config_file($user_dir, $data, true);
+
+    // rename user dir
+    if($is_rename && !@rename($user_dir, $user_dir_new)) return Json::error('Failed to rename user');
+
+    // success return new
+    Json::jexit(['success' => true, 'data' => $data]);
 
   // output PHP and server features by url ?action=tests / for diagnostics only
   } else if($action === 'tests'){

@@ -1,6 +1,6 @@
 <?php
 
-/* DOES NOT WORK! Needs to be updated for Files Gallery 0.9.0 */
+/* DOES NOT WORK! Needs to be updated for Files Gallery >= 0.9.0 */
 
 // Files Gallery tasks plugin, allows you to pre-create cache, clear cache, and more ...
 // this is not yet a public plugin ... ask in forum.files.gallery if you want to use and have questions
@@ -72,7 +72,7 @@ Class tasks {
 
     // allow_tasks
     $allow = Config::get('allow_tasks');
-    if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !Config::$has_login)) U::error('cannot!', 403);
+    if($allow === false || (!empty($allow) && is_string($allow) && !self::isset($allow)) || (!$allow && !Config::$is_logged_in)) U::error('cannot!', 403);
 
     // assign task / 'create_cache', 'clear_cache', 'create_html'
     self::$task = U::get('task');
@@ -81,8 +81,8 @@ Class tasks {
     $tasks_array = ['create_cache', 'clear_cache', 'create_html', 'download_assets'];
     if(!in_array(self::$task, $tasks_array)) U::error('Invalid task <strong>?task=' . (self::$task?:'') . '<br><br>Available tasks</strong><br>[' . implode(', ', $tasks_array) . ']', 400);
 
-    // temp / tasks plugin does not yet work with Files Gallery index 0.9.0
-    if(self::$task !== 'create_html') exit('Tasks plugin does not yet work with Files Gallery index 0.9.0.');
+    // temp / tasks plugin does not yet work with Files Gallery index >= 0.9.0
+    if(self::$task !== 'create_html') exit('Tasks plugin does not yet work with Files Gallery index >= 0.9.0.');
 
     // assign tasks
     self::$force = self::isset('force');
@@ -144,7 +144,7 @@ if(tasks::$task === 'download_assets'){
 
 // task: create_html [beta]
 } else if(tasks::$task === 'create_html'){
-	if(Config::$has_login) U::error('Cannot create html when login is enabled. Pointless!', 400);
+	if(Config::$is_logged_in) U::error('Cannot create html when login is enabled. Pointless!', 400);
 	$time = time();
 	$url = 'http' . (!empty($_SERVER['HTTPS']) ? 's' : '' ) . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['PHP_SELF'] . '?index_html=' . $time;
 	$content = file_get_contents($url);

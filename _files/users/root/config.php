@@ -2,12 +2,12 @@
 
 // CONFIG / https://www.files.gallery/docs/config/
 // Uncomment the parameters you want to edit.
-return array (
+return [
   //'root' => '',
   //'root_url_path' => NULL,
   //'start_path' => '',
   //'username' => '',
-  'password' => 'root',
+  'password' => '$2y$12$USgjZ2AeDQ58PoouC8RhAORN7FPf7jX4OrkmT5w4uVwATaIffIwF.',
   //'load_images' => true,
   //'load_files_proxy_php' => false,
   //'load_images_max_filesize' => 1000000,
@@ -32,7 +32,7 @@ return array (
   //'menu_cache_validate' => true,
   //'menu_load_all' => false,
   //'menu_recursive_symlinks' => true,
-  //'layout' => 'rows',
+  //'layout' => 'rowss',
   //'cache' => true,
   //'cache_key' => 0,
   //'storage_path' => '_files',
@@ -74,4 +74,4 @@ return array (
   //'use_google_docs_viewer' => false,
   //'lang_default' => 'en',
   //'lang_auto' => true,
-);
+];
