@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.12.0
+/* Files Gallery 0.12.1
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -65,7 +65,9 @@ class Config {
     'cache' => true,
     'cache_key' => 0,
     'storage_path' => '_files',
+    'files_include' => '',
     'files_exclude' => '',
+    'dirs_include' => '',
     'dirs_exclude' => '',
     'allow_symlinks' => true,
     'get_mime_type' => false,
@@ -107,7 +109,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.12.0';   // Files Gallery version
+  public static $version = '0.12.1';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -297,7 +299,7 @@ class Login {
     // check if browser is already logged in by session
     } else if($this->is_logged_in()){
 
-      // allow ?logout=1 parameter only use user is already logged in
+      // allow ?logout=1 parameter only if user is already logged in
       if(U::get('logout')) return $this->form();
 
       // merge user config and login
@@ -768,10 +770,22 @@ class U {
   }
 
   // get dirs hash based on various options for cache paths and browser localstorage / with cached response
+  // hash will change based on certain options
   private static $dirs_hash;
   public static function dirs_hash(){
     if(self::$dirs_hash) return self::$dirs_hash;
-    return self::$dirs_hash = substr(md5(Config::$document_root . Config::$__dir__ . Config::$root . Config::$version .  Config::get('cache_key') . U::image_resize_cache_direct() . Config::get('files_exclude') . Config::get('dirs_exclude')), 0, 6);
+    return self::$dirs_hash = substr(md5(
+      Config::$document_root .
+      Config::$__dir__ .
+      Config::$root .
+      Config::$version .
+      U::image_resize_cache_direct() .
+      Config::get('cache_key') .
+      Config::get('files_include') .
+      Config::get('files_exclude') .
+      Config::get('dirs_include') .
+      Config::get('dirs_exclude')
+    ), 0, 6);
   }
 
   // check if image_resize_cache_direct is enabled for direct access to resized image cache files / with cached response
@@ -971,10 +985,6 @@ class Path {
     if(is_string(Config::get('root_url_path'))) return Config::get('root_url_path');
 
     // if root is within application dir (index.php), we can serve application-relative path
-    //if(self::is_within_path(Config::$root, Config::$__dir__)) return substr(Config::$root, strlen(Config::$__dir__) + 1);
-
-
-    // if root is within application dir (index.php), we can serve application-relative path
     if(self::is_within_path(Config::$root, Config::$__dir__)) {
 
       // if root is same as app dir (quite common), return empty relative path ''
@@ -1133,26 +1143,32 @@ class Path {
     // exclude Files Gallery storage_path (normally _files dir relative to PHP file)
     if(Config::$storagepath && self::is_within_path($path, Config::$storagepath)) return true;
 
-    // exclude if dir or file's parent dir is excluded by config dirs_exclude
-    if(Config::get('dirs_exclude')) {
+    // dir path to check with `dirs_include` and `dirs_exclude` options
+    $dirname = $is_dir ? $path : dirname($path);
 
-      // dir to check is path or parent dir if file
-      $dirname = $is_dir ? $path : dirname($path);
+    // check dirs_include and dirs_exclude, unless dir is root (root can't be excluded)
+    if($dirname !== Config::$root){
 
-      // check if dir matches dirs_exclude, unless dir is root (root dir can't be excluded)
-      if($dirname !== Config::$root && preg_match(Config::get('dirs_exclude'), self::relpath($dirname))) return true;
+      // exclude if `dirs_include` is assigned and $dirname does not match dirs_include regex
+      if(Config::get('dirs_include') && !preg_match(Config::get('dirs_include'), self::relpath($dirname))) return true;
+
+      // exclude if `dirs_exclude` is assigned and $dirname matches dirs_exclude regex
+      if(Config::get('dirs_exclude') && preg_match(Config::get('dirs_exclude'), self::relpath($dirname))) return true;
     }
 
-    // exclude file
+    // check files_include and files_exclude
     if(!$is_dir){
 
-      // get file name
+      // get file basename
       $filename = U::basename($path);
 
-      // make sure file is not local config file
+      // exclude if file is local config file (normally _filesconfig.php)
       if($filename === Config::$localconfigpath) return true;
 
-      // exclude file name (not path) by files_exclude
+      // exclude if `files_include` is assigned and $filename does not match files_include regex
+      if(Config::get('files_include') && !preg_match(Config::get('files_include'), $filename)) return true;
+
+      // exclude if `files_exclude` is assigned and $filename matches files_exclude regex
       if(Config::get('files_exclude') && preg_match(Config::get('files_exclude'), $filename)) return true;
     }
   }
@@ -1264,8 +1280,8 @@ class Tests {
     // get various PHP ini values with ini_get()
     if(function_exists('ini_get')) foreach (['memory_limit', 'file_uploads', 'upload_max_filesize', 'post_max_size', 'max_file_uploads'] as $name) $this->prop($name, 'neutral', @ini_get($name));
 
-    // validate regex for files_exclude and dirs_exclude config options
-    foreach (['files_exclude', 'dirs_exclude'] as $key) if(Config::get($key) && @preg_match(Config::get($key), '') === false) $this->prop("Invalid <strong>$key</strong> regex", false);
+    // validate regex for exclude config options
+    foreach (['files_include', 'files_exclude', 'dirs_include', 'dirs_exclude'] as $key) if(Config::get($key) && @preg_match(Config::get($key), '') === false) $this->prop("Invalid <strong>$key</strong> regex", false);
 
     // output merged config in readable format, with sensitive properties masked out
     $this->showconfig();
@@ -1306,7 +1322,7 @@ class Tests {
     $arr = Config::$config;
 
     // mask sensitive values
-    foreach (['root', 'storage_path', 'start_path', 'username', 'password', 'license_key', 'allow_tasks', 'index_cache', 'files_exclude', 'dirs_exclude'] as $prop) if($arr[$prop]) $arr[$prop] = '***';
+    foreach (['root', 'storage_path', 'start_path', 'username', 'password', 'license_key', 'allow_tasks', 'index_cache', 'files_include', 'files_exclude', 'dirs_include', 'dirs_exclude'] as $prop) if($arr[$prop]) $arr[$prop] = '***';
 
     // create PHP array string that resembles config.php files
     $php = '<?php' . PHP_EOL . PHP_EOL . 'return ' . U::var_export($arr) . ';';
@@ -2600,11 +2616,15 @@ class Document {
     // start path from config with error response invalid (path must exist, non-excluded and must be inside root)
     } else if(Config::get('start_path')) {
 
-      // get realpath from config start_path
-      $this->absolute_start_path = Path::realpath(Config::get('start_path'));
+      // shortcut
+      $start_path = Config::get('start_path');
+
+      // get realpath from `start_path` config option
+      // `start_path` should be relative to root dir, but check also check if path is relative to app (backwards compatibility)
+      $this->absolute_start_path = Path::realpath(Path::rootpath($start_path)) ?: Path::realpath($start_path);
 
       // error if path does not exist or !is within root or is_exclude
-      if(!$this->absolute_start_path || !Path::is_within_path($this->absolute_start_path, Config::$root) || Path::is_exclude($this->absolute_start_path)) U::error('Invalid start_path ' . Config::get('start_path'));
+      if(!$this->absolute_start_path || !Path::is_within_path($this->absolute_start_path, Config::$root) || Path::is_exclude($this->absolute_start_path)) U::error('Invalid start_path ' . $start_path);
 
       // assign root-relative start_path to forward to javascript
       $this->start_path = Path::relpath($this->absolute_start_path);
@@ -2649,7 +2669,20 @@ class Document {
     $mtime_count = filemtime(Config::$root);
     foreach ($root_dirs as $root_dir) $mtime_count += filemtime($root_dir);
     // create hash based on various parameters that may affect the menu
-    $this->menu_cache_hash =  substr(md5(Config::$document_root . Config::$__dir__ . Config::$root), 0, 6) . '.' . substr(md5(Config::$version . Config::get('cache_key') . Config::get('menu_max_depth') . Config::get('menu_load_all') . (Config::get('menu_load_all') ? Config::get('files_exclude') . U::image_resize_cache_direct() : '') . Config::get('dirs_exclude') . Config::get('menu_sort')), 0, 6) . '.' . $mtime_count;
+    $this->menu_cache_hash =  substr(md5(
+      Config::$document_root .
+      Config::$__dir__ .
+      Config::$root
+    ), 0, 6) . '.' . substr(md5(
+      Config::$version .
+      Config::get('cache_key') .
+      Config::get('menu_max_depth') .
+      Config::get('menu_load_all') .
+      (Config::get('menu_load_all') ? Config::get('files_include') . Config::get('files_exclude') . U::image_resize_cache_direct() : '') .
+      Config::get('dirs_include') .
+      Config::get('dirs_exclude') .
+      Config::get('menu_sort')
+    ), 0, 6) . '.' . $mtime_count;
   }
 
   // get JSON menu_cache_file to forward to Javascript if menu_cache_validate is disabled
@@ -2740,6 +2773,8 @@ var CodeMirror = {};
 
 // load _files/js/custom.js if the file exists
 U::uinclude('js/custom.js');
+// load user custom js / disabled by default because it seems a bit pointless / un-comment if required
+// if(Login::$is_logged_in && !Login::$is_default_user) U::uinclude('users/' . Config::get('username') . '/js/custom.js');
 
 // preload all Javascript assets
 foreach (array_filter([
@@ -2781,7 +2816,9 @@ foreach (array_filter([
       'menu_load_all',
       'cache_key',
       'storage_path',
+      'files_include',
       'files_exclude',
+      'dirs_include',
       'dirs_exclude',
       'username',
       'password',
