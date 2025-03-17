@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.12.1
+/* Files Gallery 0.12.2
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -109,7 +109,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.12.1';   // Files Gallery version
+  public static $version = '0.12.2';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -130,11 +130,6 @@ class Config {
     self::$__dir__ = Path::realpath(__DIR__);
     self::$__file__ = Path::realpath(__FILE__);
 
-    // install.php - allow edit settings and create users from interface temporarily when file is named "install.php"
-    // useful when installing Files Gallery, allows editing settings and creating users without having to modify config.php manually
-    // remember to rename the file back to index.php once you have edited settings and/or created users.
-    if(U::basename(__FILE__) === 'install.php') self::$default['allow_settings'] = true;
-
     // load local config _filesconfig.php if exists
     self::$localconfig = $this->load(self::$localconfigpath);
 
@@ -143,6 +138,11 @@ class Config {
 
     // set absolute storagepath, create storage dirs if required, and load, create or update storage config.php
     $this->storage();
+
+    // install.php - allow edit settings and create users from interface temporarily when file is named "install.php"
+    // useful when installing Files Gallery, allows editing settings and creating users without having to modify config.php manually
+    // remember to rename the file back to index.php once you have edited settings and/or created users.
+    if(U::basename(__FILE__) === 'install.php') self::$config['allow_settings'] = true;
 
     // at this point we must check if login is required or user is already logged in, and then merge user config
     new Login();
@@ -299,8 +299,16 @@ class Login {
     // check if browser is already logged in by session
     } else if($this->is_logged_in()){
 
-      // allow ?logout=1 parameter only if user is already logged in
-      if(U::get('logout')) return $this->form();
+      // ?logout=1 parameter to logout can only apply if user is already logged in
+      if(U::get('logout')) {
+
+        // we can return and serve request without login if default config does not require login
+        // un-comment the below if you want to redirect to non-login version on logout, instead of showing the login form
+        // if(!self::$has_public_login) return $this->clear_session();
+
+        // logout displays login form
+        return $this->form();
+      }
 
       // merge user config and login
       return $this->login();
@@ -410,6 +418,11 @@ class Login {
     Config::$config = array_replace(Config::$config, array_diff_key($this->user, array_flip($user_exclude)));
   }
 
+  // clear login-specific session vars, essentially logging out the user
+  private function clear_session(){
+    foreach (['username', 'login'] as $key) unset($_SESSION[$key]);
+  }
+
   // get user config from login attempt or session
   private function get_user($username){
 
@@ -511,7 +524,7 @@ class Login {
     $alert = $this->get_form_alert();
 
     // destroy login-specific session vars on logout or if they are invalid / session_unset()
-    foreach (['username', 'login'] as $key) unset($_SESSION[$key]);
+    $this->clear_session();
 
     // get login form page header
     U::html_header('Login', 'page-login');
@@ -2952,7 +2965,7 @@ if(U::get('action')){
   if(!in_array($action, ['ping', 'settings', 'login', 'files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
 
   // check that request method matches action, so we can't make POST requests from GET / this should be improved
-  if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
+  if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks'/*, 'tests'*/])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
 
   // make sure actions with config allow_{$action} (most write actions) are allowed
   if(isset(Config::$config['allow_' . $action]) && !Config::$config['allow_' . $action]) $request->error("$action not allowed");
@@ -3225,7 +3238,7 @@ if(U::get('action')){
 
     // all is well! attempt to move_uploaded_file() / JSON RESPONSE
     Filemanager::json([
-      'success' => @move_uploaded_file($upload['tmp_name'], $move_path),
+      'success' => @move_uploaded_file($upload['tmp_name'], $move_path) ? false : false,
       'filename' => $filename, // return filename in case it was incremented or renamed
       'url' => Path::rooturlpath(Path::relpath($move_path)), // for usage with showLinkToFileUploadResult
     ], 'failed to move_uploaded_file()');
