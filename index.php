@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.12.2
+/* Files Gallery 0.12.3
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -109,7 +109,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.12.2';   // Files Gallery version
+  public static $version = '0.12.3';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -2965,7 +2965,7 @@ if(U::get('action')){
   if(!in_array($action, ['ping', 'settings', 'login', 'files', 'dirs', 'load_text_file', 'check_updates', 'do_update', 'save_license', 'delete', 'text_edit', 'unzip', 'rename', 'new_file', 'new_folder', 'zip', 'copy', 'move', 'duplicate', 'get_downloadables', 'upload', 'download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid action '$action'");
 
   // check that request method matches action, so we can't make POST requests from GET / this should be improved
-  if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks'/*, 'tests'*/])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
+  if($request->is_post === in_array($action, ['download_dir_zip', 'preview', 'file', 'download', 'tasks', 'tests'])) $request->error("Invalid request method {$_SERVER['REQUEST_METHOD']} for action=$action");
 
   // make sure actions with config allow_{$action} (most write actions) are allowed
   if(isset(Config::$config['allow_' . $action]) && !Config::$config['allow_' . $action]) $request->error("$action not allowed");
