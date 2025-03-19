@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.12.3
+/* Files Gallery 0.12.4
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -109,7 +109,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.12.3';   // Files Gallery version
+  public static $version = '0.12.4';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -3238,7 +3238,7 @@ if(U::get('action')){
 
     // all is well! attempt to move_uploaded_file() / JSON RESPONSE
     Filemanager::json([
-      'success' => @move_uploaded_file($upload['tmp_name'], $move_path) ? false : false,
+      'success' => @move_uploaded_file($upload['tmp_name'], $move_path),
       'filename' => $filename, // return filename in case it was incremented or renamed
       'url' => Path::rooturlpath(Path::relpath($move_path)), // for usage with showLinkToFileUploadResult
     ], 'failed to move_uploaded_file()');
