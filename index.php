@@ -761,6 +761,32 @@ class U {
   public static function readfile($path, $mime, $message = false, $cache = false, $clone = false){
     if(!$path || !file_exists($path)) return false;
     if($clone && @copy($path, $clone)) U::message('cloned to ' . U::basename($clone));
+    $filesize = filesize($path);
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+      $range = $_SERVER['HTTP_RANGE'];
+      list(, $range) = explode('=', $range, 2);
+      list($start, $end) = explode('-', $range);
+
+      $offset = intval($start);
+      $end = $end ? intval($end) : $filesize - 1;
+      $length = $end - $offset + 1;
+
+      header('HTTP/1.1 206 Partial Content');
+      header("Content-Range: bytes $offset-$end/$filesize");
+      U::header($message, $cache, $mime, $length, 'inline', U::basename($path));
+      $fp = fopen($path, 'rb');
+      fseek($fp, $offset);
+      $bufferSize = 8192;
+      while (!feof($fp) && ($length > 0)) {
+          $read = ($length > $bufferSize) ? $bufferSize : $length;
+          echo fread($fp, $read);
+          $length -= $read;
+          flush();
+      }
+      fclose($fp);
+      exit;
+    }
     U::header($message, $cache, $mime, filesize($path), 'inline', U::basename($path));
     if(!is_readable($path) || readfile($path) === false) U::error('Failed to read file ' . U::basename($path), 400);
     exit;
