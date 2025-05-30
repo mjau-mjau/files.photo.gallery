@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.13.0
+/* Files Gallery 0.13.1
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -116,7 +116,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.13.0';   // Files Gallery version
+  public static $version = '0.13.1';   // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -3039,6 +3039,13 @@ class CleanCache {
 
         // check if entry corresponds to existing cache file in $map array and isn't a duplicate entry
         if(isset($map[$filename]) && !$map[$filename]){
+
+          // fix an issue when two entries might have got added into same link
+          if(strpos($path, ':') && preg_match('/(.+)([a-z0-9]{6}\.\d+\.\d+\.\d+\.jpg:.+$)/', $path, $matches)){
+            $path = $matches[1]; // re-assign $path for current entry
+            $lines[$index] = "$filename:$path"; // correct this line
+            array_push($lines, $matches[2]); // push extracted line to end of array
+          }
 
           // mark this item checked so we can ignore further duplicate entries
           $map[$filename] = 1;
