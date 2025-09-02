@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.13.1
+/* Files Gallery 0.14.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -35,6 +35,7 @@ class Config {
   public static $default = [
     'root' => '',
     'root_url_path' => null,
+    'root_lock' => null,
     'start_path' => false,
     'username' => '',
     'password' => '',
@@ -42,12 +43,12 @@ class Config {
     'load_files_proxy_php' => false,
     'load_images_max_filesize' => 1000000,
     'image_resize_enabled' => true,
+    'image_resize_use_imagemagick' => false,
     'image_resize_cache' => true,
     'image_resize_cache_use_dir' => false,
     'image_resize_dimensions' => 320,
     'image_resize_dimensions_retina' => 480,
     'image_resize_dimensions_allowed' => '',
-    'image_resize_types' => 'jpeg, png, gif, webp, bmp, avif',
     'image_resize_quality' => 85,
     'image_resize_function' => 'imagecopyresampled',
     'image_resize_sharpen' => true,
@@ -105,10 +106,9 @@ class Config {
     'upload_allowed_file_types' => '',
     'upload_max_filesize' => 0,
     'upload_exists' => 'increment',
-    'video_thumbs' => true,
-    'video_ffmpeg_path' => 'ffmpeg',
-    'pdf_thumbs' => true,
+    'ffmpeg_path' => 'ffmpeg',
     'imagemagick_path' => 'magick',
+    'imagemagick_image_types' => 'heif, heic, tiff, tif, psd, dng',
     'use_google_docs_viewer' => false,
     'lang_default' => 'en',
     'lang_auto' => true,
@@ -116,7 +116,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.13.1';   // Files Gallery version
+  public static $version = '0.14.0';  // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -157,14 +157,11 @@ class Config {
     // at this point we must check if login is required or user is already logged in, and then merge user config
     new Login();
 
-    // assign public real root path after login user is resolved
-    self::$root = Path::realpath(self::get('root'));
+    // assign root realpath after login user is resolved
+    self::$root = Path::valid_root(self::get('root'));
 
     // error if root path does not exist
-    if(!self::$root) U::error('root dir <b>' . self::get('root') . '</b> does not exist');
-
-    // storagepath can't be the same as root dir, because storage_path is excluded
-    if(self::$storagepath === self::$root) U::error('storage_path can\'t be the same as root');
+    if(!self::$root) U::error('Invalid root dir "' . self::get('root') . '"');
 
     // shortcut option `allow_all` allows all file actions (except settings, check_updates, tests, tasks)
     if(self::get('allow_all')) foreach (['upload', 'delete', 'rename', 'new_folder', 'new_file', 'duplicate', 'text_edit', 'zip', 'unzip', 'move', 'copy', 'download', 'mass_download', 'mass_copy_links'] as $k) self::$config['allow_'.$k] = true;
@@ -173,6 +170,12 @@ class Config {
   // public shortcut function to get config option Config::get('option')
   public static function get($option){
     return self::$config[$option];
+  }
+
+  // public get config comma-delimited string option as array
+  public static function get_array($option) {
+    $str = self::$config[$option];
+    return !empty($str) && is_string($str) ? array_map('trim', explode(',', $str)) : [];
   }
 
   // load a config file and trim values / returns empty array if file doesn't exist
@@ -414,6 +417,8 @@ class Login {
     // list of excluded user config options because they should be global or have no function for user or could cause harm
     // you can add your own options here if you want to prevent some options from being changed per user
     $user_exclude = [
+      'root_lock',                        // should be global and pre-assiged in _filesconfig.php
+      'image_resize_use_imagemagick',     // should be global
       'image_resize_cache_use_dir',       // should be global
       'image_resize_dimensions',          // should not change per user as it invalidates shared image cache
       'image_resize_dimensions_retina',   // should not change per user as it invalidates shared image cache
@@ -425,7 +430,7 @@ class Login {
       'image_cache_max_last_access_time', // should be global
       'image_cache_validate_time',        // should be global
       'storage_path',                     // storage path is always global and must be defined in main config
-      'video_ffmpeg_path',                // should be global
+      'ffmpeg_path',                      // should be global
       'imagemagick_path',                 // should be global
       'index_cache',                      // should be global / not available for logged in users anyway
     ];
@@ -563,7 +568,7 @@ class Login {
     class Login {
 
       // available languages
-      langs = ['ar', 'bg', 'cs', 'da', 'de', 'en', 'el', 'es', 'et', 'fi', 'fr', 'hu', 'id', 'it', 'ja', 'ko', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'th', 'tr', 'uk', 'zh'];
+      langs = ['ar', 'bg', 'cs', 'da', 'de', 'en', 'el', 'es', 'et', 'fi', 'fr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'sv', 'th', 'tr', 'uk', 'zh'];
 
       // language object empty (English) by default
       lang = {};
@@ -740,41 +745,24 @@ class U {
     return self::$memory_limit_mb = $val ? $val / 1024 / 1024 : 0; // convert bytes to M
   }
 
-  // get exec app path (ffmpeg, imagemagick)
-  private static function exec_app_path($app_path){
-
-    // external thumbnail apps required load_images and image_resize_cache to be enabled
-    foreach (['load_images', 'image_resize_cache'] as $key) if(!Config::get($key)) return;
-
-    // exec() must be available to access command-line tools
-    if(!function_exists('exec')) return;
-
-    // path to ffmpeg in command-line is normally just 'ffmpeg', but escapeshellarg() in case using absolute path
-    $path = escapeshellarg(Config::get($app_path));
-    //$path = '"' . str_replace('"', '\"', Config::get($app_path)) . '"'; // <- if path contains Chinese chars
-
-    // attempt to run -version function on app and return the path or false on fail
-    return @exec($path . ' -version') ? $path : false;
+  // get and validate path for exec() apps imagemagick and ffmpeg
+  public static function app_path($app){
+    if(!Config::get($app . '_path') || !function_exists('exec')) return;
+    $path = escapeshellarg(Config::get($app . '_path'));
+    // app is available and path is valid if we can detect -version and there are no errors
+    return @exec("$path -version", $output, $result_code) && !$result_code ? $path : false;
   }
 
-  // detect FFmpeg availability for video thumbnails and return path or false / https://ffmpeg.org/
-  public static function ffmpeg_path(){
-
-    // below config options must be enabled for FFmpeg to apply
-    foreach (['video_thumbs', 'video_ffmpeg_path'] as $key) if(!Config::get($key)) return;
-
-    // return imagemagick path for exec()
-    return U::exec_app_path('video_ffmpeg_path');
-  }
-
-  // detect ImageMagick availability for PDF thumbnails and return path or false / https://imagemagick.org/
-  public static function imagemagick_path(){
-
-    // below config options must be enabled for FFmpeg to apply
-    foreach (['pdf_thumbs', 'imagemagick_path'] as $key) if(!Config::get($key)) return;
-
-    // return imagemagick path for exec()
-    return U::exec_app_path('imagemagick_path');
+  // detect imagemagick type and cache response (because it might be used in files loop)
+  private static $imagemagick;
+  public static function imagemagick(){
+    if(isset(self::$imagemagick)) return self::$imagemagick;
+    // PHP imagick extension if available
+    if(extension_loaded('imagick')) return self::$imagemagick = 'imagick';
+    // imagemagick is available from command-line
+    if(U::app_path('imagemagick')) return self::$imagemagick = 'imagemagick';
+    // not avaialble
+    return self::$imagemagick = false;
   }
 
   // readfile() wrapper function to output file with tests, clone option and headers
@@ -816,11 +804,22 @@ class U {
     exit;
   }
 
-  // return an array of supported image resize types / used by Javascript to determine what resized image types can be requested
-  public static function resize_image_types(){
+  // return an array of supported PHP GD image resize types //
+  public static function gd_image_types(){
     return array_merge(['jpeg', 'jpg', 'png', 'gif'], array_filter(['webp', 'bmp', 'avif'], function($type){
       return function_exists('imagecreatefrom' . $type);
     }));
+  }
+
+  // return an array of supported and commonly used imagemagick image types (which aren't already available in gd_image_types)
+  public static function imagemagick_image_types(){
+    return U::imagemagick() ? Config::get_array('imagemagick_image_types') : [];
+  }
+
+  // return an array of supported image resize types, combine gd_image_types and imagemagick_image_types
+  // forwarded to javascript and used to determine what types can be used for folder preview
+  public static function resize_image_types(){
+    return array_merge(U::gd_image_types(), U::imagemagick_image_types());
   }
 
   // common error response with response code, error message and json option
@@ -1012,7 +1011,7 @@ class U {
     // some minimal validation on the config data before attempting to save
     if(@preg_match_all("/^<\?php|return|password/", $data) < 3) return Json::error('Invalid user config');
 
-    //
+    // create a test file to validate and encrypt password before we save to config
     $test_file = "$dir/test.php";
 
     // must be able to save test config
@@ -1032,8 +1031,8 @@ class U {
     // validate as array
     if(!is_array($test)) return Json::error('Invalid config');
 
-    // validate root dir
-    if(!empty($test['root']) && !is_dir($test['root'])) return Json::error('Invalid root dir');
+    // validate root dir if `root` option is set
+    if(!empty($test['root']) && !Path::valid_root($test['root'])) return Json::error('Invalid root dir');
 
     // password must exist
     if($check_pass && empty($test['password'])) return Json::error('Config must contain a password');
@@ -1083,7 +1082,7 @@ class U {
   public static function image_cache_file_append($cache, $path){
     if(!$cache || !$path || !Config::$cachepath || !Config::get('image_cache_file') || Config::get('image_resize_cache_use_dir')) return;
     $cache_file = Config::$cachepath . '/images/' . Config::get('image_cache_file'); // _files/cache/images/cache.txt
-    $entry = U::basename($cache) . ':' . $path . PHP_EOL; // new line d4e1a4.466757.1743061702.480.jpg:/full/path/to/image.jpg
+    $entry = PHP_EOL . U::basename($cache) . ':' . $path;// . PHP_EOL; // new line d4e1a4.466757.1743061702.480.jpg:/full/path/to/image.jpg
     @file_put_contents($cache_file, $entry, FILE_APPEND); // append new line (fastest and least complicated way to store entries)
   }
 
@@ -1103,6 +1102,31 @@ class Path {
   public static function realpath($path){
     $realpath = realpath($path);
     return $realpath ? str_replace('\\', '/', $realpath) : false;
+  }
+
+  // return absolute root path if config root string is valid
+  public static function valid_root($str){
+
+    // get root realpath from string
+    $root = Path::realpath($str);
+
+    // root does not exist (or is not dir or is not readable or equals storage path)
+    if(!$root || !is_dir($root) || Config::$storagepath === $root) return false;
+
+    // return valid root if `root_lock` option is empty (default)
+    if(!Config::get('root_lock')) return $root;
+
+    // get root_lock realpath
+    $root_lock = Path::realpath(Config::get('root_lock'));
+
+    // invalid root_lock dir (doesn't exist or inaccessible)
+    if(!$root_lock) return false;
+
+    // root is invalid it it's not within root_lock dir / check resolved path and relative paths, in case root is symlink
+    if(!Path::is_within_path($root, $root_lock) && !Path::is_within_path($str, Config::get('root_lock'))) return false;
+
+    // return valid $root
+    return $root;
   }
 
   // get absolute path by appending relative path to root path (does not resolve symlinks)
@@ -1224,7 +1248,7 @@ class Path {
   // get cache path for resized image/video/pdf files
   public static function imagecachepath($path, $resize, $filesize, $filemtime){
     // store cache in $dir/_files/* if image_resize_cache_use_dir is enabled ($dir/_files/{filename.jpg}.jpg)
-    if(Config::get('image_resize_cache_use_dir')) return dirname($path) . '/_files/' . U::basename($path) . '.jpg';
+    if(Config::get('image_resize_cache_use_dir')) return dirname($path) . '/_files/' . U::basename($path) . ($resize === 'convert' ? '.convert' : '') . '.jpg';
     // use _files/cache/images/$hash.filesize.$filemtime.$resize.jpg
     return Config::$cachepath . '/images/' . U::hash($path) . ".$filesize.$filemtime.$resize.jpg";
   }
@@ -1405,8 +1429,13 @@ class Tests {
     $this->check_path(Config::$storagepath, 'storage_path');
     $this->check_path(__FILE__, U::basename(__FILE__));
 
-    // check a few PHP extensions gd, exif and mbstring
-    if(function_exists('extension_loaded')) foreach (['gd', 'exif', 'mbstring'] as $name) $this->prop($name, extension_loaded($name));
+    // check a few PHP extensions
+    if(function_exists('extension_loaded')) {
+      // check extensions gd, exif, mbstring and imagick
+      foreach (['gd', 'exif', 'mbstring', 'imagick'] as $name) $this->prop($name, extension_loaded($name));
+      // specifically check if imagick supports PDF (requires ghostscript)
+      if(extension_loaded('imagick')) $this->prop('imagick PDF support', !empty((new Imagick())->queryFormats('PDF')));
+    }
 
     // check if ZipArchive class exists
     $this->prop('ZipArchive', class_exists('ZipArchive'));
@@ -1414,11 +1443,19 @@ class Tests {
     // check various PHP functions
     foreach (['mime_content_type', 'finfo_file', 'iptcparse', 'exif_imagetype', 'session_start', 'ini_get', 'exec'] as $name) $this->prop($name . '()', function_exists($name));
 
-    // check ffmpeg if exec() is available
-    if(function_exists('exec')) $this->prop('ffmpeg', !!U::ffmpeg_path());
+    // check command-line apps if exec() is available (pointless to output if not available)
+    if(function_exists('exec')) {
 
-    // check imagemagick if exec() is available
-    if(function_exists('exec')) $this->prop('imagemagick', !!U::imagemagick_path());
+      // check ffmpeg
+      $this->prop('ffmpeg', !!U::app_path('ffmpeg'));
+
+      // check imagemagick
+      $imagemagick = !!U::app_path('imagemagick');
+      $this->prop('imagemagick', $imagemagick);
+
+      // check ghostscript (required for PDF thumbnails) if imagemagick is available
+      if($imagemagick) $this->prop('ghostscript', !!@exec('gs -version'));
+    }
 
     // get various PHP ini values with ini_get()
     if(function_exists('ini_get')) foreach (['memory_limit', 'file_uploads', 'upload_max_filesize', 'post_max_size', 'max_file_uploads'] as $name) $this->prop($name, 'neutral', @ini_get($name));
@@ -1480,128 +1517,227 @@ class Tests {
   }
 }
 
-// class FileResponse / outputs file, video preview image, resized image or proxies any file by PHP
+// class FileResponse / outputs file, video thumb, pdf thumb, converted image, resized image or proxies any file by PHP
 class FileResponse {
 
   // vars
-  private $path;
-  private $mime;
-  private $resize;
-  private $clone;
-  // static vars
-  private static $preview_cmd_video = '%APP_PATH% -ss 3 -t 1 -hide_banner -i "%PATH%" -frames:v 1 -an -vf "thumbnail,scale=min\'(%RESIZE%,iw)\':min\'(%RESIZE%,ih)\':force_original_aspect_ratio=decrease" -r 1 -y -f mjpeg "%CACHE%" 2>&1';
-  private static $preview_cmd_pdf = '%APP_PATH% "%PATH%[0]" -background white -flatten -quality 80 -thumbnail %RESIZE%x%RESIZE% "%CACHE%" 2>&1';
+  private $path;      // path to file
+  private $mime;      // file mime type
+  private $clone;     // clone parameter for folder preview images
+  private $type;      // response type; resize, video_thumb, pdf_thumb, convert or proxy file
+  private $resize;    // resize value for image response / used for resizing and for naming the cache file
+  private $app;       // application used to create the image (imagemagick or ffmpeg)
+  private $cachepath; // image cache path
 
-  // construct FileResponse all processes in due order
-  public function __construct($path, $resize = false, $clone = false){
+  // ImageMagick resize image thumbnail command
+  private static $cmd_resize = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality %QUALITY% -thumbnail %RESIZE%x%RESIZE%\> -adaptive-sharpen 0x0.75 "%CACHE%" 2>&1';
 
-    // exif if invalid $path
+  // ImageMagick convert from heif/heic/tiff/psd/dng to jpg for browser compatibility (no resize)
+  private static $cmd_convert = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality 75 "%CACHE%" 2>&1';
+  //private static $cmd_convert = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality 75 -resize 2000x2000\> "%CACHE%" 2>&1';
+
+  // ImageMagick create PDF thumbnail / [0] for first page
+  private static $cmd_pdf_thumb = '%APP_PATH% "%PATH%[0]" -background white -flatten -quality 80 -thumbnail %RESIZE%x%RESIZE% "%CACHE%" 2>&1';
+
+  // FFmpeg video thumbnail
+  private static $cmd_video_thumb = '%APP_PATH% -ss 3 -t 1 -hide_banner -i "%PATH%" -frames:v 1 -an -vf "thumbnail,scale=min\'(%RESIZE%,iw)\':min\'(%RESIZE%,ih)\':force_original_aspect_ratio=decrease" -r 1 -y -f mjpeg "%CACHE%" 2>&1';
+
+  // construct FileResponse / $type, $resize and $clone parameters are optional, used when getting a folder preview image
+  public function __construct($path, $type = false, $resize = false, $clone = false){
+
+    // exit on invalid path
     if(!$path) U::error('Invalid file request', 404);
 
-    // store path and resolve potential symlinks
+    // store path and resolve symlinks
     $this->path = Path::realpath($path);
 
-    // get mime to check if requested video or image files are valid
+    // get mime type for file validation
     $this->mime = U::mime($this->path);
-
-    // resize numeric value assigned if image resize, but could be set to 'video'
-    $this->resize = is_numeric($resize) ? intval($resize) : $resize;
 
     // clone the file (used by folder preview action)
     $this->clone = $clone;
 
-    // get preview from exec() for video/FFmpeg and pdf/Imagemagick
-    if(in_array($this->resize, ['video', 'pdf'])) return $this->get_exec_preview($this->resize);
+    // get type of fileresponse / resize, video_thumb, pdf_thumb, convert / no type = proxy file request
+    $this->type = $type ?: $this->get_type();
 
-    // get resized image preview (convert resize parameter to number, else it will return 0, not allowed)
-    if($this->resize) return $this->get_image_preview();
+    // attempt to proxy the file by PHP when there is no $type
+    if(!$this->type) return $this->proxy_file();
 
-    // get file proxied through PHP if it's not within document root
-    $this->get_file_proxied();
+    // get resize value for image response / used for resizing and naming the cache file
+    $this->resize = $resize ?: $this->get_resize();
+
+    // trigger $type function / resize(), video_thumb(), pdf_thumb() or convert()
+    $this->{$this->type}();
   }
 
-  // get preview from exec() for video/FFmpeg and pdf/Imagemagick
-  private function get_exec_preview($type){
-
-    // image_resize_cache required for exec previews, because we need to create the file on disk anyway
-    if(!Config::get('image_resize_cache')) U::error("image_resize_cache must be enabled to create and store $type previews", 400);
-
-    // requirements / only check $mime if $mime detected
-    if($this->mime && strpos($this->mime, $this->resize) === false) U::error("Unsupported $type type $this->mime", 415);
-
-    // get FFmpeg path `video_ffmpeg_path`
-    if($type === 'video'){
-      $app_path = U::ffmpeg_path();
-
-    // get ImageMagick path `imagemagick_path`
-    } else {
-      $app_path = U::imagemagick_path();
-    }
-
-    // error if !$app_path
-    if(!$app_path) return U::error($type . ' thumbnails disabled, check your <a href="' . U::basename(__FILE__) . '?action=tests" target="_blank">diagnostics</a>', 400);
-
-    // set resize to highest 'image_resize_dimensions_retina', but make sure it's assigned and larger than 'image_resize_dimensions'
-    $resize = U::image_resize_dimensions_retina() ?: Config::get('image_resize_dimensions');
-
-    // get cache path where we will look for image or create it
-    $cachepath = Path::imagecachepath($this->path, $resize, filesize($this->path), filemtime($this->path));
-
-    // check for cached preview / clone if called from folder preview
-    if(U::readfile($cachepath, 'image/jpeg', "$type preview from cache", true, $this->clone)) return;
-
-    // when using image_resize_cache_use_dir, we must make sure $dir/_files dir exists
-    U::ensure_files_dir($this->path);
-
-    // get exec command string
-    $cmd = str_replace(
-      ['%APP_PATH%', '%PATH%', '%CACHE%', '%RESIZE%'],
-      [$app_path, escapeshellcmd($this->path), $cachepath, $resize],
-      self::${"preview_cmd_$type"});
-
-    // attempt to execute exec command
-    exec($cmd, $output, $result_code);
-
-    // fail if result_code is anything else than 0
-    if($result_code) U::error("Error generating $type preview image (\$result_code $result_code)", 500);
-
-    // error if for some reason, the created $cachepath file does not exist
-    if(!file_exists($cachepath)) U::error('Cache file ' . U::basename($cachepath) . ' does not exist', 404);
-
-    // fix for empty preview images (f.ex extremely short videos or other unknown errors), create 1px placeholder
-    if(!filesize($cachepath)) imagejpeg(imagecreate(1, 1), $cachepath);
-
-    // add new cache entry in _files/cache/images/cache.txt file
-    U::image_cache_file_append($cachepath, $this->path);
-
-    // output created video thumbnail
-    U::readfile($cachepath, 'image/jpeg', "$type preview created", true, $this->clone);
+  // get type of request from query / resize, video_thumb, pdf_thumb, convert / no type = proxy file request
+  private function get_type(){
+    foreach (['resize', 'video_thumb', 'pdf_thumb', 'convert'] as $key) if(U::get($key)) return $key;
   }
 
-  // get image preview resized image
-  private function get_image_preview(){
+  // get file proxied through PHP / we only do this when load_files_proxy_php is enabled or for file types like .php
+  private function proxy_file(){
 
-    // only image mime types can be resized
-    if($this->mime && strtok($this->mime, '/') !== 'image') U::error('Unsupported image type ' . $this->mime, 415);
+    // don't allow getting file by proxy if !load_files_proxy_php and the file is available directly by url
+    if(!Config::get('load_files_proxy_php') && Path::has_urlpath($this->path)) U::error('File can\'t be proxied', 400);
+
+    // read file / $mime or 'application/octet-stream' if $mime is unknown (should not happen unless missing mime functions)
+    U::readfile($this->path, ($this->mime ?: 'application/octet-stream'), 'File proxied', true);
+  }
+
+  // get resize value for image response / used for resizing and naming the cache file
+  private function get_resize(){
+    if(U::get('resize')) return intval(U::get('resize')); // resize value will come in request ?resize=480 for nor thumbnails
+    if($this->type === 'convert') return 'convert'; // on convert type, images are not resized, but 'convert' is part of the cache name
+    return U::image_resize_dimensions_retina() ?: Config::get('image_resize_dimensions'); // for PDF and video thumbs, use largest size
+  }
+
+  // get resized preview image / does some preliminary tests before determining imagemagick of PHP GD
+  private function resize(){
 
     // allow resize image only if config load_images and image_resize_enabled are enabled
     foreach (['load_images', 'image_resize_enabled'] as $key) if(!Config::get($key)) U::error("Config $key disabled", 400);
 
     // check if requested resize value is allowed
-    if(!U::resize_is_allowed($this->resize)) U::error("Resize parameter $this->resize is not allowed", 400);
+    if(!U::resize_is_allowed($this->resize)) U::error('Resize parameter ' . U::get('resize') . ' is not allowed', 400);
 
-    // get ResizeImage()
+    // make sure file mime type is image, unless the file is imagemagick, in which case we can't rely on mime ...
+    if($this->mime && strpos($this->mime, 'image') === false && !$this->is_imagemagick()) U::error("Unsupported image type $this->mime", 415);
+
+    // resize image with ImageMagick
+    if($this->resize_use_imagemagick()) return $this->create_image('imagemagick');
+
+    // resize image with PHP GD
     new ResizeImage($this->path, $this->resize, $this->clone);
   }
 
-  // get file proxied through PHP if it's not within document root
-  private function get_file_proxied(){
+  // use imagemagick to create thumbnail if config use_imagemagick or if file is imagemagick type
+  private function resize_use_imagemagick(){
+    return Config::get('image_resize_use_imagemagick') || $this->is_imagemagick();
+  }
 
-    // don't allow getting file by proxy if !load_files_proxy_php and the file is available directly by url
-    if(!Config::get('load_files_proxy_php') && Path::has_urlpath($this->path)) U::error('File can\'t be proxied', 400);
+  // check if file is specifically an imagemagick format (that PHP GD can't handle)
+  private function is_imagemagick(){
+    return in_array(U::extension($this->path, true), Config::get_array('imagemagick_image_types'));
+  }
 
-    // read file / $mime or 'application/octet-stream' if $mime is unknown (should not happen unless missing functions)
-    U::readfile($this->path, ($this->mime ?: 'application/octet-stream'), 'File proxied', true);
+  // video thumbnail with ffmpeg / first make sure mime type is video
+  private function video_thumb(){
+    if($this->mime && strpos($this->mime, 'video') === false) U::error("Invalid video format $this->mime", 400);
+    $this->create_image('ffmpeg');
+  }
+
+  // PDF thumbnail with imagemagick (PDF requires ghostscript) / mime must match application/pdf
+  private function pdf_thumb(){
+    if($this->mime && $this->mime !== 'application/pdf') U::error("Invalid PDF format $this->mime", 400);
+    $this->create_image('imagemagick');
+  }
+
+  // convert non-browser image formats like heic, tif, psd and dng to browser-friendly jpg format
+  private function convert(){
+    if(!$this->is_imagemagick()) U::error("Invalid convert format", 400);
+    $this->create_image('imagemagick');
+  }
+
+  // create image from imagemagick or ffmpeg with exec()
+  private function create_image($app){
+
+    // image_resize_cache required for exec previews, for efficiency and because we need to create the file on disk anyway
+    if(!Config::get('image_resize_cache')) U::error("image_resize_cache must be enabled to store created images", 400);
+
+    // get cache path where we will look for image or create it
+    $this->cachepath = Path::imagecachepath($this->path, $this->resize, filesize($this->path), filemtime($this->path));
+
+    // check for cached image / clone if called from folder preview
+    if(U::readfile($this->cachepath, 'image/jpeg', "$this->type from cache", true, $this->clone)) return;
+
+    // when using image_resize_cache_use_dir, we must make sure $dir/_files dir exists
+    U::ensure_files_dir($this->path);
+
+    // store app / imagemagick or ffmpeg
+    $this->app = $app;
+
+    // use PHP imagick extension if available
+    if($this->is_imagick()) {
+      $this->imagick_image();
+
+    // otherwise use exec() to interact with the app on the command-line
+    } else {
+      $this->exec_image();
+    }
+
+    // error if for some reason, the created $this->cachepath file does not exist
+    if(!file_exists($this->cachepath)) U::error('Cache file ' . U::basename($this->cachepath) . ' does not exist', 404);
+
+    // fix for empty preview images (f.ex extremely short videos or other unknown errors), create 1px placeholder
+    // this seems pointless, but might as well keep it
+    if(!filesize($this->cachepath)) imagejpeg(imagecreate(1, 1), $this->cachepath);
+
+    // add new cache entry in _files/cache/images/cache.txt file
+    U::image_cache_file_append($this->cachepath, $this->path);
+
+    // output image from cache path
+    U::readfile($this->cachepath, 'image/jpeg', "$app | $this->type created", true, $this->clone);
+  }
+
+  // use PHP imagick extension if available / https://www.php.net/manual/en/intro.imagick.php
+  private function is_imagick(){
+    return $this->app === 'imagemagick' && extension_loaded('imagick');
+  }
+
+  // create image from PHP imagick extension / potentially used for resize, video_thumb, pdf_thumb and convert
+  private function imagick_image(){
+    // for pdf_thumb, we can detect up front if PDF is not supported
+    if($this->type === 'pdf_thumb' && empty((new Imagick())->queryFormats('PDF'))) return U::error('Your PHP Imagick does not support the PDF format', 400);
+    $imagick = new Imagick($this->path . ($this->type === 'pdf_thumb' ? '[0]' : '')); // pdf use first page
+    if($imagick->getNumberImages() > 1) $imagick->mergeImageLayers(imagick::LAYERMETHOD_FLATTEN); // flatten psd
+    $imagick->autoOrient(); // correct the image's orientation based on its EXIF data.
+    if(is_numeric($this->resize)) { // resize
+      $imagick->thumbnailImage($this->resize, $this->resize, true); // resize keep aspect
+      $imagick->sharpenImage(0, 0.75); // sharpen thumbnail so it's not too blurry
+    }
+    $imagick->setImageFormat('jpeg');
+    $imagick->setImageCompression(Imagick::COMPRESSION_JPEG);
+    $imagick->setImageCompressionQuality($this->type === 'convert' ? 75 : Config::get('image_resize_quality'));
+    $imagick->writeImage($this->cachepath);
+    $imagick->clear();
+    $imagick->destroy();
+  }
+
+  // create image from exec() / imagemagick or ffmpeg
+  private function exec_image(){
+
+    // get and validate external $app path, imagemagick or ffmpeg
+    $app_path = U::app_path($this->app);
+
+    // error if !$app_path / app is missing, or path is wrong or exec() function does not exist
+    if(!$app_path) return U::error($this->app . ' is not available, check your <a href="' . U::basename(__FILE__) . '?action=tests" target="_blank">diagnostics</a>', 400);
+
+    // get exec command string by replacing variables with real values
+    $cmd = str_replace(
+      ['%APP_PATH%', '%PATH%', '%CACHE%', '%RESIZE%', '%QUALITY%'],
+      [$app_path, escapeshellcmd($this->path), $this->cachepath, $this->resize, Config::get('image_resize_quality')],
+      self::${"cmd_$this->type"});
+
+    // attempt to execute exec command
+    exec($cmd, $output, $result_code);
+
+    // fail if result_code is anything else than 0
+    if($result_code) {
+
+      // simply attempt to fix errors caused by video being shorter than -ss time (default -ss 3), create from first frame
+      if($this->type === 'video_thumb' && preg_match('/ -ss \d+/', $cmd)) exec(preg_replace('/ -ss \d+/', '', $cmd), $output, $result_code);
+
+      // definite unknown fail / dump data in response
+      if($result_code) {
+
+        // delete empty error cache / disabled by default ... why continue to retry a slow/failed process?
+        // if(file_exists($this->cachepath) && !filesize($this->cachepath)) @unlink($this->cachepath);
+
+        // definite error
+        U::error("Error generating $this->type (\$result_code $result_code)", 500);
+      }
+    }
   }
 }
 
@@ -1629,7 +1765,7 @@ class ResizeImage {
     $filesize = filesize($this->path);
 
     // create local $short vars from config 'image_resize_*' options, because it's much easier and more readable
-    foreach (['cache', 'types', 'quality', 'function', 'sharpen', 'memory_limit', 'max_pixels', 'min_ratio'] as $key) {
+    foreach (['cache', 'quality', 'function', 'sharpen', 'memory_limit', 'max_pixels', 'min_ratio'] as $key) {
       $$key = Config::get("image_resize_$key");
     }
 
@@ -1658,21 +1794,14 @@ class ResizeImage {
     $this->bits = isset($imagesize['bits']) && is_numeric($imagesize['bits']) ? $imagesize['bits'] : 8;
     $this->channels = isset($imagesize['channels']) && is_numeric($imagesize['channels']) ? $imagesize['channels'] : 3;
 
-    // get image type extension or die / used to check if $ext is in `image_resize_types` and for "imagecreatefrom$ext"() function
+    // get image ext string from $type or exit / used to make sure image is valid image resize type
     $ext = image_type_to_extension($type, false) ?: U::error("Invalid image type $type");
 
-    // add more calculated values to response headers
+    // exit if invalid GD image resize type
+    if(!in_array($ext, U::gd_image_types())) return U::error("Invalid image resize type $ext");
+
+    // add more values to response headers
     U::message([$mime, $ext, "$width x $height", 'ratio ' . round($ratio, 2), "$this->rwidth x $this->rheight"]);
-
-    // if image extension is not in `image_resize_types`, attempt to serve original if filesize is <= `load_images_max_filesize`
-    if(!in_array($ext, $this->get_resize_types($types))){
-
-      // exit if original image exceeds `load_images_max_filesize`
-      if($filesize > Config::get('load_images_max_filesize')) U::error("Image $ext is not in `image_resize_types`, and can't serve original because filesize $filesize exceeds `load_images_max_filesize` " . Config::get('load_images_max_filesize') . ' bytes', 400);
-
-      // attempt to serve original or error
-      if(!U::readfile($this->path, $mime, 'Original image served because image is not within image_resize_types', true, $clone)) U::error('File does not exist', 404);
-    }
 
     // exit if image pixels (dimensions) exceeds 'image_resize_max_pixels' => 60000000 (default)
     if($max_pixels && $this->pixels > $max_pixels) U::error("Image pixels $this->pixels ($width x $height) exceeds `image_resize_max_pixels` $max_pixels", 400);
@@ -1680,15 +1809,11 @@ class ResizeImage {
     // serve original if resize ratio < min_ratio, but only if filesize <= load_images_max_filesize
     if($ratio < max($min_ratio, 1) && $filesize <= Config::get('load_images_max_filesize') && !U::readfile($this->path, $mime, "Original image served, because resize ratio $ratio < min_ratio $min_ratio", true, $clone)) U::error('File does not exist', 404);
 
-    // prepare imagecreatefrom$EXT() to create image GD resource from path
-    $imagecreatefrom = "imagecreatefrom$ext";
-    if(!function_exists($imagecreatefrom)) U::error("Function $imagecreatefrom() does not exist", 500);
-
     // check if avaialble memory is sufficient to resize image, and attempt to temporarily assign higher memory_limit
     $this->set_memory_limit($memory_limit);
 
     // create new source image GD resource from path
-    $src_image = $imagecreatefrom($this->path) ?: U::error("Function $imagecreatefrom() failed", 500);
+    $src_image = "imagecreatefrom$ext"($this->path) ?: U::error("Function imagecreatefrom$ext() failed", 500);
 
     // create destination image GD resource with resize dimensions
     $this->dst_image = imagecreatetruecolor($this->rwidth, $this->rheight) ?: U::error('Function imagecreatetruecolor() failed', 500);
@@ -1702,8 +1827,8 @@ class ResizeImage {
     // destroy src_image GD resource to free up memory
     imagedestroy($src_image);
 
-    // rotate resized image according to exif image orientation if required
-    $this->exif_orientation();
+    // rotate resized image according to exif image orientation if required / only jpeg and tiff support
+    if(in_array($mime, ['image/jpeg', 'image/tiff'])) $this->exif_orientation();
 
     // sharpen resized images, because default PHP imagecopyresized() make images blurry ...
     if($sharpen) $this->sharpen();
@@ -1749,14 +1874,6 @@ class ResizeImage {
     if($required > $new) U::error("Resizing this image requires >= {$required}M. Your PHP memory_limit is {$new}M", 400);
     // assign $new memory from config image_resize_memory_limit if > $current (default memory_limit)
     if($new > $current && @ini_set('memory_limit', $new . 'M')) U::message("{$current}M => {$new}M (min {$required}M)");
-  }
-
-  // get resize types array from config 'image_resize_types' => 'jpeg, png, gif, webp, bmp, avif'
-  private function get_resize_types($types){
-    return array_filter(array_map(function($key){
-      $type = trim(strtolower($key));
-      return $type === 'jpg' ? 'jpeg' : $type;
-    }, explode(',', $types)));
   }
 
   // sharpen resized images, because default PHP imagecopyresized() make images blurry ...
@@ -2046,7 +2163,7 @@ class Dir {
       if(substr($filename, 0, 6) === '_files') {
 
         // add potential custom preview images to $custom_previews associative array 'filename.jpg' => '_files_filename.pdf.jpg'
-        if($check_custom_previews && preg_match('/^_files_(.+)\.(jpe?g|gif|png)$/i', $filename, $m)) $custom_previews[$m[1]] = $filename;
+        if($check_custom_previews && preg_match('/^_files_(.+)\.(jpe?g|gif|png|svg)$/i', $filename, $m)) $custom_previews[$m[1]] = $filename;
 
         // anything that starts with _files* is excluded ...
         continue;
@@ -2080,8 +2197,8 @@ class Dir {
     // loop cache files
     if(!empty($files)) foreach ($files as $file) {
 
-      // get filename without extension 'original.png.jpg' => 'original.png' which should match a filename in $this->data['files']
-      $filename = pathinfo($file, PATHINFO_FILENAME);
+      // get original filename by removing cache extension and potential '.convert', which should match a filename in $this->data['files']
+      $filename = preg_replace('/\.convert$/', '', pathinfo($file, PATHINFO_FILENAME));
 
       // check if cache file corresponds to a file in $this->data['files']
       $match = isset($this->data['files'][$filename]) ? $this->data['files'][$filename] : false;
@@ -2163,6 +2280,12 @@ class File {
     // assign file mime type / will return null for most files unless config get_mime_type = true (slow)
     $this->file['mime'] = $this->mime();
 
+    // attempt to get PDF preview dimensions for better layout flow
+    if($this->file['ext'] === 'pdf') {
+      $dimensions = $this->im_getimagesize();
+      if($dimensions) $this->file['preview_ratio'] = $dimensions[0] / $dimensions[1];
+    }
+
     // assign image data if file is image
     $this->set_image_data();
 
@@ -2191,16 +2314,16 @@ class File {
   // assign image data if file is image
   private function set_image_data(){
 
-    // first check if item seems like an image by checking mime or extension
+    // determine if file seems to be an image by checking mime or extension
     if(!$this->is_image()) return;
 
     // count image in dir, assuming it's some kind of image, even if !getimagesize() or !readable
     $this->dir->data['images_count'] ++;
 
-    // pre-assign image icon, assuming it's some kind of image, even if !getimagesize() or !readable
+    // pre-assign image icon, assuming it's some kind of image
     $this->file['icon'] = 'image';
 
-    // getimagesize() wrapper, populates and re-formats $this->image / exit if empty
+    // getimagesize() wrapper, populates and re-formats $this->image and $this->image_info for iptcparse / else exit, as it's not a known image
     if(!$this->getimagesize()) return;
 
     // assign item mime from getimagesize() because it is more accurate and we might not have file mime yet anyway
@@ -2209,8 +2332,8 @@ class File {
     // get image Iptc
     $this->image['iptc'] = Iptc::get($this->image_info);
 
-    // get image Exif if we anticipate memory is sufficient
-    if($this->memory_sufficient_exif()) $this->image['exif'] = Exif::get($this->realpath);
+    // get image exif
+    $this->getimageexif();
 
     // invert image width height if exif orientation is > 4 && < 9, because dimensions should match browser-oriented image
     $this->image_orientation_flip_dimensions();
@@ -2225,24 +2348,41 @@ class File {
     $this->file['image'] = array_filter($this->image);
   }
 
-  // check if file seems to be an image by means of mime type or extension
+  // core image file extensions / we check these formats with getimagesize()
+  private static $image_types_core = 'gif,jpg,jpeg,jpc,jp2,jpx,jb2,png,swf,psd,bmp,tiff,tif,wbmp,xbm,ico,webp,avif,svg,heic,heif,dng';
+
+  // return an array of image extensions and cache response (because we don't want to compile the array for every file in the loop)
+  private static $image_types;
+  private static function get_image_types(){
+    if(isset(self::$image_types)) return self::$image_types;
+    // merge core image extensions with imagemagick_image_types, because there may be custom formats
+    return self::$image_types = array_merge(explode(',', self::$image_types_core), Config::get_array('imagemagick_image_types'));
+  }
+
+  // determine if file seems to be an image by means of mime type or extension
   private function is_image(){
     if($this->file['is_dir']) return;
-    if($this->file['mime']) return substr($this->file['mime'], 0, 6) === 'image/';
-    return in_array($this->file['ext'], ['gif','jpg','jpeg','jpc','jp2','jpx','jb2','png','swf','psd','bmp','tiff','tif','wbmp','xbm','ico','webp','avif','svg']);
+    if($this->file['mime']) return substr($this->file['mime'], 0, 6) === 'image/'; // check by mime if set
+    return in_array($this->file['ext'], self::get_image_types()); // check extension
   }
 
   // getimagesize() wrapper validates and re-formats output into $this->image array
   private function getimagesize(){
 
-    // exit
+    // image must be readable and ignore svg
     if(!$this->file['is_readable'] || $this->file['ext'] === 'svg') return;
 
-    // getimagesize()
-    $imagesize = @getimagesize($this->realpath, $this->image_info);
+    // try @getimagesize() from PHP, unless heic/heif because getimagesize() definitely does not work with these formats
+    $imagesize = !in_array($this->file['ext'], ['heic', 'heif']) ? @getimagesize($this->realpath, $this->image_info) : false;
 
-    // exit on invalid $imagesize
+    // on false/fail try to get image dimensions from imagemagick
+    if(!$imagesize) $imagesize = $this->im_getimagesize();
+
+    // exit if empty or invalid / basically we can't get imagesize from getimagesize() or imagemagick, or the image is corrupt
     if(empty($imagesize) || !is_array($imagesize)) return;
+
+    // add mime manually if not set (normally if processed with imagemagick)
+    if(empty($imagesize['mime'])) $imagesize['mime'] = 'image/' . $this->file['ext']; // append mime manually
 
     // re-format properties from getimagesize() into $this->image array
     foreach ([
@@ -2256,6 +2396,39 @@ class File {
 
     // valid if array is !empty
     return !empty($this->image);
+  }
+
+  // imagemagick getimagesize replacement for heif/heic/dng so we can get width and height at least
+  private function im_getimagesize(){
+
+    // use PHP imagick extension if available
+    if(U::imagemagick() === 'imagick') {
+      try {
+        $im = new Imagick();
+        $im->pingImage($this->realpath);
+        return [$im->getImageWidth(), $im->getImageHeight()];
+      } catch(Exception $e){
+        return false;
+      }
+
+    // get width and height from Imagemagick "identify" command
+    } else if(U::imagemagick() === 'imagemagick'){
+      $wxh = @exec('identify -ping -format "%wx%h" "' . escapeshellcmd($this->realpath) . '" 2>&1', $output, $result_code);
+      if(empty($wxh) || $result_code) return false; // fail if response is empty or result_code is anything else than 0
+      $dimensions = array_map('intval', array_filter(explode('x', $wxh ?: ''), 'is_numeric'));
+      return count($dimensions) === 2 ? $dimensions : false;
+    }
+
+    // we can't get width or height from heic/heif without imagemagick
+    return false;
+  }
+
+  // get image exif data for each file
+  private function getimageexif(){
+    // exif_read_data only supports jpeg and tiff
+    if(!isset($this->image['mime']) || !in_array($this->image['mime'], ['image/jpeg', 'image/tiff'])) return;
+    if(!$this->memory_sufficient_exif()) return; // make sure there is sufficient memory so folders response doesn't break
+    $this->image['exif'] = Exif::get($this->realpath); // get exif data for image
   }
 
   // if image is oriented by some Exif orientation values, we need to flip width and height properties to match browser orientation
@@ -3007,8 +3180,12 @@ class CleanCache {
       // split filename into array to extract parts / $pathhash.$filesize.$filemtime.$image_resize_dimensions.jpg
       $arr = explode('.', $filename);
 
-      // delete cache file if name is invalid or resize value is invalid or file exceeds max last access time
-      if(count($arr) !== 5 || !U::resize_is_allowed(intval($arr[3])) || $this->exceeds_max_last_access_time($file)) {
+      // delete cache file if name is invalid or resize is invalid or file exceeds max last access time
+      if(
+        count($arr) !== 5 ||
+        ($arr[3] != 'convert' && !U::resize_is_allowed(intval($arr[3]))) ||
+        $this->exceeds_max_last_access_time($file)
+      ) {
         $this->remove('images', $file);
 
       // add remaining valid cache files to $map associative array for checkup vs cache.txt file
@@ -3040,12 +3217,13 @@ class CleanCache {
         // check if entry corresponds to existing cache file in $map array and isn't a duplicate entry
         if(isset($map[$filename]) && !$map[$filename]){
 
-          // fix an issue when two entries might have got added into same link
-          if(strpos($path, ':') && preg_match('/(.+)([a-z0-9]{6}\.\d+\.\d+\.\d+\.jpg:.+$)/', $path, $matches)){
+          // fix an issue when two entries might have got added into same line
+          // I think this was resolved when we added PHP_EOL in front of new lines ...
+          /*if(strpos($path, ':') && preg_match('/(.+)([a-z0-9]{6}\.\d+\.\d+\.\d+\.jpg:.+$)/', $path, $matches)){
             $path = $matches[1]; // re-assign $path for current entry
             $lines[$index] = "$filename:$path"; // correct this line
             array_push($lines, $matches[2]); // push extracted line to end of array
-          }
+          }*/
 
           // mark this item checked so we can ignore further duplicate entries
           $map[$filename] = 1;
@@ -3103,6 +3281,7 @@ class CleanCache {
 
     // get filesize and filemtime from cache filename (name is already validated in $map array)
     list($filesize, $filemtime) = array_map('intval', array_slice(explode('.', $filename), 1, 2));
+
 
     // if empty filesize and filemtime (dir preview images), valid if filemtime(cache) >= filemtime(path)
     if(!$filesize && !$filemtime) return filemtime("$this->images_dir/$filename") >= filemtime($path);
@@ -3439,18 +3618,15 @@ foreach (array_filter([
       'image_resize_sharpen',
       'get_mime_type',
       'license_key',
-      'video_thumbs',
-      'video_ffmpeg_path',
-      'pdf_thumbs',
+      'ffmpeg_path',
       'imagemagick_path',
       'folder_preview_default',
       'image_resize_dimensions_allowed',
       'download_dir_cache',
-      'imagemagick_path',
       'index_cache'
     ];
 
-    // create config array without excluded items
+    // assemble config array without excluded items
     $config = array_diff_key(Config::$config, array_flip($exclude));
 
     // return Javascript config array, merged (some values overridden) with main $config
@@ -3464,6 +3640,7 @@ foreach (array_filter([
       'dirs' => $this->dirs, // preload dirs array for Javascript, will be served as json
       'dirs_hash' => U::get_current_dirs_hash(), // dirs_hash to manage JS localStorage
       'resize_image_types' => U::resize_image_types(), // let JS know what image types can be resized
+      'imagemagick_image_types' => U::imagemagick_image_types(), // let JS know what image types can be converted with imagemagick
       'image_resize_dimensions_retina' => U::image_resize_dimensions_retina(), // calculated retina
       'location_hash' => md5(Config::$root), // so JS can assume localStorage for relative paths like menu items open
       'is_logged_in' => Login::$is_logged_in, // for login/logout interface
@@ -3475,8 +3652,9 @@ foreach (array_filter([
       'server_exif' => function_exists('exif_read_data'), // so images can be oriented from exif orientation if detected
       'image_resize_memory_limit' => $this->get_image_resize_memory_limit(), // so JS can calculate what images can be resized
       'md5' => $this->get_md5('6c6963656e73655f6b6579'), // calculate md5 hash
-      'video_thumbs_enabled' => !!U::ffmpeg_path(), // so JS can attempt to load video preview images
-      'pdf_thumbs_enabled' => !!U::imagemagick_path(), // so JS can attempt to load PDF preview images
+      'ffmpeg' => !!U::app_path('ffmpeg'), // ffmpeg required for video thumbnails
+      'imagemagick' => !!U::imagemagick(), // detect imagemagick
+      'imagemagick_pdf' => U::imagemagick() === 'imagick' ? !empty((new Imagick())->queryFormats('PDF')) : !!U::imagemagick(), // pdf support
       'lang_custom' => $this->lang_custom(), // get custom language files _files/lang/*.json
       'x3_path' => X3::x3_path(), // in case of used with X3, forward X3 url path for thumbnails
       'userx' => isset($_SERVER['USERX']) ? $_SERVER['USERX'] : false, // forward USERX from server (if set)
@@ -3843,7 +4021,7 @@ if(U::get('action')){
     if(strpos($filename, '/') !== false || strpos($filename, '\\') !== false) $request->error('Illegal \slash/ in filename ' . $filename);
 
     // get allowed_file_types / 'image/*, .pdf, .mp4'
-    $allowed_file_types = Config::get('upload_allowed_file_types') ? array_filter(array_map('trim', explode(',', Config::get('upload_allowed_file_types')))) : false;
+    $allowed_file_types = Config::get_array('upload_allowed_file_types');
 
     // check allowed_file_types
     if(!empty($allowed_file_types)){
@@ -3963,25 +4141,42 @@ if(U::get('action')){
 
       // prepare arrays of supported image and video formats
       $image_types = U::resize_image_types();
-      $video_types = U::ffmpeg_path() ? ['mp4', 'm4v', 'm4p', 'webm', 'ogv', 'mkv', 'avi', 'mov', 'wmv'] : [];
+      $video_types = U::app_path('ffmpeg') ? ['mp4', 'm4v', 'm4p', 'webm', 'ogv', 'mkv', 'avi', 'mov', 'wmv'] : [];
 
       // loop files to locate first match
       foreach ($files as $file) {
 
-        // get extension lowercase
+        // get file extension lowercase
         $ext = U::extension($file, true);
-        if(empty($ext)) continue; // skip if no extension
 
-        // match image or video, return target resize_dimensions if image
-        $match = in_array($ext, $image_types) ? Config::get('image_resize_dimensions') : (in_array($ext, $video_types) ? 'video' : false);
-        if(!$match) continue; // skip if extension not supported
+        // skip if !extension
+        if(empty($ext)) continue;
 
-        // skip if is_exclude or !readable
+        // found image resize type
+        if(in_array($ext, $image_types)) {
+          $type = 'resize';
+
+        // found video_thumb type
+        } else if(in_array($ext, $video_types)){
+          $type = 'video_thumb';
+
+        // found pdf_thumb type
+        } else if($ext === 'pdf' && U::imagemagick()){
+          $type = 'pdf_thumb';
+
+        // skip if nothing found
+        } else {
+          continue;
+        }
+
+        // skip if file is_exclude or !readable
         if(Path::is_exclude($file, false) || !is_readable($file)) continue;
 
-        // get preview image or video, and clone into preview $cachepath for faster access on next request for dir
-        new FileResponse($file, $match, $cachepath);
-        break; exit; // just in case, although new FileResponse() will exit on U::readfile()
+        // return preview image $type with default image_resize_dimensions and clone into preview $cachepath for fast access
+        new FileResponse($file, $type, Config::get('image_resize_dimensions'), $cachepath);
+
+        // break loop and return file
+        break; exit;
       }
     }
 
@@ -3991,7 +4186,7 @@ if(U::get('action')){
 
   // $_GET file / resize parameter for preview images, else will proxy any file
   } else if($action === 'file'){
-    new FileResponse($file, U::get('resize'));
+    new FileResponse($file);
 
   // $_GET force download single file by PHP
   } else if($action === 'download'){
@@ -4036,7 +4231,16 @@ if(U::get('action')){
 
       // loop user dirs and get configs
       if($users_dir) foreach (glob("$users_dir/*", GLOB_ONLYDIR) as $dir) {
-        $users[U::basename($dir)] = @file_get_contents("$dir/config.php") ?: '';
+
+        // get user data from config.php if file exists (it should normally always exist)
+        $user_data = file_exists("$dir/config.php") ? @file_get_contents("$dir/config.php") : false;
+
+        // populate $users array only if config data exists and is non-empty (valid)
+        if($user_data) {
+          $users[U::basename($dir)] = $user_data;
+
+        // delete invalid user dirs
+        } else Filemanager::delete($dir);
       }
 
       // return user array with configs
@@ -4055,25 +4259,38 @@ if(U::get('action')){
     // $username must be set and not equal default
     if(!$username || strtolower($username) === 'default') return Json::error('Invalid username' . ($username ? " '$username'" : ''));
 
-    // if new_name (new user or renamed user) check if name is allowed (we don't need to check existing usernames)
-    if($new_name && !Filemanager::name_is_allowed($new_name)) return Json::error('Invalid username');
-
     // config path vars
     $users_dir = Config::$storagepath . '/users';
     $user_dir =  "$users_dir/$username";
-    $user_dir_new = $new_name ? "$users_dir/$new_name" : false;
 
-    // make sure config already exists unless is new user
-    if(!$is_new && !file_exists("$user_dir/config.php")) return Json::error('Username does not exist');
-
-    // REMOVE / Remove dir and return
+    // REMOVE / Remove user dir and return
     if($remove) return Json::jexit(['success' => !!Filemanager::delete($user_dir)]);
 
-    // if new user or rename, make sure dir doesn't already exist
-    if($new_name && file_exists($user_dir_new)) return Json::error('Username already exists');
+    // prepare $user_dir_new for new users and renamed users
+    $user_dir_new = $new_name ? "$users_dir/$new_name" : false;
 
-    // create user dir if is new user
+    // new user or renamed user
+    if($new_name){
+
+      // check if name is allowed (we don't need to check existing usernames)
+      if(!Filemanager::name_is_allowed($new_name)) return Json::error('Invalid username');
+
+      // if user dir already exists (for some reason)
+      if(file_exists($user_dir_new)) {
+
+        // if user config.php file exists, then user is already valid and can't overwrite valid users
+        if(file_exists("$user_dir_new/config.php")) return Json::error('Username already exists');
+
+        // delete invalid user dir, because it will get recreated or renamed (shouldn't really exist in the first place)
+        Filemanager::delete($user_dir_new);
+      }
+    }
+
+    // create user dir if is new user (renamed user we rename dir)
     if($is_new && !@mkdir($user_dir_new, 0777, true)) return Json::error('Failed to create user dir');
+
+    // make sure dir already exists for existing users
+    if(!$is_new && !is_dir($user_dir)) return Json::error('Username does not exist');
 
     // validate and save config.php file
     $data = U::save_config_file($user_dir, $data, true);
