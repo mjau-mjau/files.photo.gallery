@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.14.0
+/* Files Gallery 0.14.1
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -107,7 +107,7 @@ class Config {
     'upload_max_filesize' => 0,
     'upload_exists' => 'increment',
     'ffmpeg_path' => 'ffmpeg',
-    'imagemagick_path' => 'magick',
+    'imagemagick_path' => 'convert',
     'imagemagick_image_types' => 'heif, heic, tiff, tif, psd, dng',
     'use_google_docs_viewer' => false,
     'lang_default' => 'en',
@@ -116,7 +116,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.14.0';  // Files Gallery version
+  public static $version = '0.14.1';  // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -746,11 +746,22 @@ class U {
   }
 
   // get and validate path for exec() apps imagemagick and ffmpeg
-  public static function app_path($app){
+  public static function app_pathZZZZ($app){
     if(!Config::get($app . '_path') || !function_exists('exec')) return;
     $path = escapeshellarg(Config::get($app . '_path'));
     // app is available and path is valid if we can detect -version and there are no errors
     return @exec("$path -version", $output, $result_code) && !$result_code ? $path : false;
+  }
+
+  // get and validate path for exec() apps imagemagick and ffmpeg
+  public static function app_path($app){
+    $path = Config::get($app . '_path');
+    if(!$path || !function_exists('exec')) return false;
+    $escaped = escapeshellarg($path);
+    if(!@exec("$escaped -version", $output, $result_code) || $result_code) return false;
+    // upgrade to the newer 'magick' command if imagemagick_path is 'convert' and we detect ImageMagick 7
+    if($path === 'convert' && strpos($output[0], 'ImageMagick 7') !== false) return "'magick'";
+    return $escaped;
   }
 
   // detect imagemagick type and cache response (because it might be used in files loop)
@@ -1450,8 +1461,8 @@ class Tests {
       $this->prop('ffmpeg', !!U::app_path('ffmpeg'));
 
       // check imagemagick
-      $imagemagick = !!U::app_path('imagemagick');
-      $this->prop('imagemagick', $imagemagick);
+      $imagemagick = U::app_path('imagemagick');
+      $this->prop("imagemagick $imagemagick", !!$imagemagick);
 
       // check ghostscript (required for PDF thumbnails) if imagemagick is available
       if($imagemagick) $this->prop('ghostscript', !!@exec('gs -version'));
@@ -1690,7 +1701,9 @@ class FileResponse {
     // for pdf_thumb, we can detect up front if PDF is not supported
     if($this->type === 'pdf_thumb' && empty((new Imagick())->queryFormats('PDF'))) return U::error('Your PHP Imagick does not support the PDF format', 400);
     $imagick = new Imagick($this->path . ($this->type === 'pdf_thumb' ? '[0]' : '')); // pdf use first page
-    if($imagick->getNumberImages() > 1) $imagick->mergeImageLayers(imagick::LAYERMETHOD_FLATTEN); // flatten psd
+    $imagick->setImageBackgroundColor('white'); // in case PDF or transparency
+    $imagick->setImageAlphaChannel(imagick::ALPHACHANNEL_REMOVE); // in case PDF or transparency
+    if($imagick->getNumberImages() > 1) $imagick->mergeImageLayers(imagick::LAYERMETHOD_FLATTEN); // flatten
     $imagick->autoOrient(); // correct the image's orientation based on its EXIF data.
     if(is_numeric($this->resize)) { // resize
       $imagick->thumbnailImage($this->resize, $this->resize, true); // resize keep aspect
@@ -2280,12 +2293,6 @@ class File {
     // assign file mime type / will return null for most files unless config get_mime_type = true (slow)
     $this->file['mime'] = $this->mime();
 
-    // attempt to get PDF preview dimensions for better layout flow
-    if($this->file['ext'] === 'pdf') {
-      $dimensions = $this->im_getimagesize();
-      if($dimensions) $this->file['preview_ratio'] = $dimensions[0] / $dimensions[1];
-    }
-
     // assign image data if file is image
     $this->set_image_data();
 
@@ -2375,8 +2382,13 @@ class File {
     // try @getimagesize() from PHP, unless heic/heif because getimagesize() definitely does not work with these formats
     $imagesize = !in_array($this->file['ext'], ['heic', 'heif']) ? @getimagesize($this->realpath, $this->image_info) : false;
 
-    // on false/fail try to get image dimensions from imagemagick
-    if(!$imagesize) $imagesize = $this->im_getimagesize();
+    // on getimagesize() false/fail or DNG format, try to get image dimensions from ImageMagick
+    // although PHP getimagesize() can get image_info from DNG (because it's a type of TIFF file), image dimensions are often wrong
+    if(!$imagesize || $this->file['ext'] === 'dng') {
+      $im_imagesize = $this->im_getimagesize();
+      // merge with current $imagesize
+      if($im_imagesize) $imagesize = array_replace($imagesize ?: [], $im_imagesize);
+    }
 
     // exit if empty or invalid / basically we can't get imagesize from getimagesize() or imagemagick, or the image is corrupt
     if(empty($imagesize) || !is_array($imagesize)) return;
@@ -2413,7 +2425,7 @@ class File {
 
     // get width and height from Imagemagick "identify" command
     } else if(U::imagemagick() === 'imagemagick'){
-      $wxh = @exec('identify -ping -format "%wx%h" "' . escapeshellcmd($this->realpath) . '" 2>&1', $output, $result_code);
+      $wxh = @exec('identify -ping -format "%wx%h" "' . escapeshellcmd($this->realpath) . '[0]" 2>&1', $output, $result_code);
       if(empty($wxh) || $result_code) return false; // fail if response is empty or result_code is anything else than 0
       $dimensions = array_map('intval', array_filter(explode('x', $wxh ?: ''), 'is_numeric'));
       return count($dimensions) === 2 ? $dimensions : false;
