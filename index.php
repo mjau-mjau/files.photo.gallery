@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.14.1
+/* Files Gallery 0.14.2
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -116,7 +116,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.14.1';  // Files Gallery version
+  public static $version = '0.14.2';  // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -743,14 +743,6 @@ class U {
     if(isset(self::$memory_limit_mb)) return self::$memory_limit_mb;
     $val = U::ini_value_to_bytes('memory_limit');
     return self::$memory_limit_mb = $val ? $val / 1024 / 1024 : 0; // convert bytes to M
-  }
-
-  // get and validate path for exec() apps imagemagick and ffmpeg
-  public static function app_pathZZZZ($app){
-    if(!Config::get($app . '_path') || !function_exists('exec')) return;
-    $path = escapeshellarg(Config::get($app . '_path'));
-    // app is available and path is valid if we can detect -version and there are no errors
-    return @exec("$path -version", $output, $result_code) && !$result_code ? $path : false;
   }
 
   // get and validate path for exec() apps imagemagick and ffmpeg
@@ -1825,8 +1817,11 @@ class ResizeImage {
     // check if avaialble memory is sufficient to resize image, and attempt to temporarily assign higher memory_limit
     $this->set_memory_limit($memory_limit);
 
+    // assign imagecreatefrom$ext() function
+    $imagecreatefrom = "imagecreatefrom$ext";
+
     // create new source image GD resource from path
-    $src_image = "imagecreatefrom$ext"($this->path) ?: U::error("Function imagecreatefrom$ext() failed", 500);
+    $src_image = $imagecreatefrom($this->path) ?: U::error("Function $imagecreatefrom() failed", 500);
 
     // create destination image GD resource with resize dimensions
     $this->dst_image = imagecreatetruecolor($this->rwidth, $this->rheight) ?: U::error('Function imagecreatetruecolor() failed', 500);
