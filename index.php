@@ -1,6 +1,6 @@
 <?php
 
-/* Files Gallery 0.14.2
+/* Files Gallery 0.15.0
 www.files.gallery | www.files.gallery/docs/ | www.files.gallery/docs/license/
 ---
 This PHP file is only 10% of the application, used only to connect with the file system. 90% of the codebase, including app logic, interface, design and layout is managed by the app Javascript and CSS files.
@@ -108,6 +108,7 @@ class Config {
     'upload_exists' => 'increment',
     'ffmpeg_path' => 'ffmpeg',
     'imagemagick_path' => 'convert',
+    'imagemagick_prefer_imagick' => true,
     'imagemagick_image_types' => 'heif, heic, tiff, tif, psd, dng',
     'use_google_docs_viewer' => false,
     'lang_default' => 'en',
@@ -116,7 +117,7 @@ class Config {
   ];
 
   // global application variables created on new Config()
-  public static $version = '0.14.2';  // Files Gallery version
+  public static $version = '0.15.0';  // Files Gallery version
   public static $config = [];         // config array merged from _filesconfig.php, config.php and default config
   public static $localconfigpath = '_filesconfig.php'; // optional config file in current dir, useful when overriding shared configs
   public static $localconfig = [];    // config array from localconfigpath
@@ -760,12 +761,17 @@ class U {
   private static $imagemagick;
   public static function imagemagick(){
     if(isset(self::$imagemagick)) return self::$imagemagick;
-    // PHP imagick extension if available
-    if(extension_loaded('imagick')) return self::$imagemagick = 'imagick';
+    // PHP imagick extension if preferred and available
+    if(U::prefer_imagick()) return self::$imagemagick = 'imagick';
     // imagemagick is available from command-line
     if(U::app_path('imagemagick')) return self::$imagemagick = 'imagemagick';
     // not avaialble
     return self::$imagemagick = false;
+  }
+
+  // prefer PHP imagick extension if available https://www.php.net/manual/en/intro.imagick.php, otherwise default to ImageMagick CLI
+  public static function prefer_imagick(){
+    return Config::get('imagemagick_prefer_imagick') && extension_loaded('imagick');
   }
 
   // readfile() wrapper function to output file with tests, clone option and headers
@@ -1095,6 +1101,17 @@ class U {
     $dir = Config::$storagepath . '/cache/' . $type; // get cache dir path
     $files = file_exists($dir) ? @glob("$dir/$hash.*.json") : false; // get invalid $hash.filemtime.json file in cache dir
     if(!empty($files)) foreach ($files as $file) @unlink($file); // delete all invalid
+  }
+
+  // get url from .URL shortcut files / https://fileinfo.com/extension/url
+  public static function get_url_shortcut($path) {
+    if(!$path || !file_exists($path) || !is_readable($path) || U::extension($path) !== 'url') return;
+    $lines = @file($path);
+    if(empty($lines) || !is_array($lines)) return;
+    foreach ($lines as $str) {
+      if(!preg_match('/^url\s*=\s*([\S\s]+)/i', trim($str), $matches) || !isset($matches[1])) continue;
+      return $matches[1];
+    }
   }
 }
 
@@ -1526,6 +1543,8 @@ class FileResponse {
   // vars
   private $path;      // path to file
   private $mime;      // file mime type
+  private $ext;       // file extension
+  private $video_url; // remote video url parsed from .url files
   private $clone;     // clone parameter for folder preview images
   private $type;      // response type; resize, video_thumb, pdf_thumb, convert or proxy file
   private $resize;    // resize value for image response / used for resizing and for naming the cache file
@@ -1533,17 +1552,17 @@ class FileResponse {
   private $cachepath; // image cache path
 
   // ImageMagick resize image thumbnail command
-  private static $cmd_resize = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality %QUALITY% -thumbnail %RESIZE%x%RESIZE%\> -adaptive-sharpen 0x0.75 "%CACHE%" 2>&1';
+  private static $cmd_resize = "%APP_PATH% %PATH% -flatten -auto-orient -quality %QUALITY% -thumbnail %RESIZE%x%RESIZE%\> -adaptive-sharpen 0x0.75 '%CACHE%' 2>&1";
 
   // ImageMagick convert from heif/heic/tiff/psd/dng to jpg for browser compatibility (no resize)
-  private static $cmd_convert = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality 75 "%CACHE%" 2>&1';
-  //private static $cmd_convert = '%APP_PATH% "%PATH%" -flatten -auto-orient -quality 75 -resize 2000x2000\> "%CACHE%" 2>&1';
+  private static $cmd_convert = "%APP_PATH% %PATH% -flatten -auto-orient -quality 75 '%CACHE%' 2>&1";
+  //private static $cmd_convert = "%APP_PATH% %PATH% -flatten -auto-orient -quality 75 -resize 2000x2000\> '%CACHE%' 2>&1";
 
   // ImageMagick create PDF thumbnail / [0] for first page
-  private static $cmd_pdf_thumb = '%APP_PATH% "%PATH%[0]" -background white -flatten -quality 80 -thumbnail %RESIZE%x%RESIZE% "%CACHE%" 2>&1';
+  private static $cmd_pdf_thumb = "%APP_PATH% %PATH% -background white -flatten -quality 80 -thumbnail %RESIZE%x%RESIZE% '%CACHE%' 2>&1";
 
   // FFmpeg video thumbnail
-  private static $cmd_video_thumb = '%APP_PATH% -ss 3 -t 1 -hide_banner -i "%PATH%" -frames:v 1 -an -vf "thumbnail,scale=min\'(%RESIZE%,iw)\':min\'(%RESIZE%,ih)\':force_original_aspect_ratio=decrease" -r 1 -y -f mjpeg "%CACHE%" 2>&1';
+  private static $cmd_video_thumb = "%APP_PATH% -ss 3 -t 1 -hide_banner -i %PATH% -frames:v 1 -an -vf \"thumbnail,scale='min(%RESIZE%,iw)':'min(%RESIZE%,ih)':force_original_aspect_ratio=decrease\" -r 1 -y -f mjpeg '%CACHE%' 2>&1";
 
   // construct FileResponse / $type, $resize and $clone parameters are optional, used when getting a folder preview image
   public function __construct($path, $type = false, $resize = false, $clone = false){
@@ -1556,6 +1575,9 @@ class FileResponse {
 
     // get mime type for file validation
     $this->mime = U::mime($this->path);
+
+    // get file extension type
+    $this->ext = U::extension($this->path, true);
 
     // clone the file (used by folder preview action)
     $this->clone = $clone;
@@ -1621,13 +1643,21 @@ class FileResponse {
 
   // check if file is specifically an imagemagick format (that PHP GD can't handle)
   private function is_imagemagick(){
-    return in_array(U::extension($this->path, true), Config::get_array('imagemagick_image_types'));
+    return in_array($this->ext, Config::get_array('imagemagick_image_types'));
   }
 
-  // video thumbnail with ffmpeg / first make sure mime type is video
+  // video thumbnail with ffmpeg / first make sure mime type is video or video url
   private function video_thumb(){
-    if($this->mime && strpos($this->mime, 'video') === false) U::error("Invalid video format $this->mime", 400);
+    if(!$this->get_video_url() && $this->mime && strpos($this->mime, 'video') === false) U::error("Invalid video format $this->mime", 400);
     $this->create_image('ffmpeg');
+  }
+
+  // get remote video url from .url files so we can create video thumbnail from remote file
+  private function get_video_url(){
+    if($this->ext !== 'url') return;
+    $url = U::get_url_shortcut($this->path);
+    if(!$url || !in_array(U::extension($url, true), ['webm', 'm4v', 'mp4'])) return;
+    return $this->video_url = $url;
   }
 
   // PDF thumbnail with imagemagick (PDF requires ghostscript) / mime must match application/pdf
@@ -1683,9 +1713,9 @@ class FileResponse {
     U::readfile($this->cachepath, 'image/jpeg', "$app | $this->type created", true, $this->clone);
   }
 
-  // use PHP imagick extension if available / https://www.php.net/manual/en/intro.imagick.php
+  // use PHP imagick extension if preferred and available
   private function is_imagick(){
-    return $this->app === 'imagemagick' && extension_loaded('imagick');
+    return $this->app === 'imagemagick' && U::prefer_imagick();
   }
 
   // create image from PHP imagick extension / potentially used for resize, video_thumb, pdf_thumb and convert
@@ -1718,10 +1748,10 @@ class FileResponse {
     // error if !$app_path / app is missing, or path is wrong or exec() function does not exist
     if(!$app_path) return U::error($this->app . ' is not available, check your <a href="' . U::basename(__FILE__) . '?action=tests" target="_blank">diagnostics</a>', 400);
 
-    // get exec command string by replacing variables with real values
+    // get exec command string by replacing variables with real values / check video_url if set (remote video from .url shortcut)
     $cmd = str_replace(
       ['%APP_PATH%', '%PATH%', '%CACHE%', '%RESIZE%', '%QUALITY%'],
-      [$app_path, escapeshellcmd($this->path), $this->cachepath, $this->resize, Config::get('image_resize_quality')],
+      [$app_path, $this->exec_input_path(), $this->cachepath, $this->resize, Config::get('image_resize_quality')],
       self::${"cmd_$this->type"});
 
     // attempt to execute exec command
@@ -1743,6 +1773,13 @@ class FileResponse {
         U::error("Error generating $this->type (\$result_code $result_code)", 500);
       }
     }
+  }
+
+  // exec() command path input variations
+  private function exec_input_path(){
+    $path = $this->video_url ?: $this->path; // remote video path from url file or $this->path
+    if($this->type === 'pdf_thumb') $path .= '[0]'; // pdf file get first page
+    return escapeshellarg($path); // escape path argument for shell
   }
 }
 
@@ -2260,6 +2297,9 @@ class File {
     // check if file is symlink (only if realpath !== path)
     $is_link = $symlinked ? is_link($path) : false;
 
+    // get file extension
+    $ext = $is_dir ? '' : U::extension($is_link ? $this->realpath : $filename, true);
+
     // get filesize if !$is_dir
     $filesize = $is_dir ? 0 : filesize($this->realpath); // filesize($path) if we only want to get size of symlink (0)
 
@@ -2272,7 +2312,7 @@ class File {
     // add properties to file array
     $this->file = [
       'basename' => $filename,
-      'ext' => $is_dir ? '' : U::extension($is_link ? $this->realpath : $filename, true),
+      'ext' => $ext,
       'fileperms' => substr(sprintf('%o', fileperms($this->realpath)), -4),
       'filetype' => $filetype,
       'filesize' => $filesize,
@@ -2292,7 +2332,7 @@ class File {
     $this->set_image_data();
 
     // read .URL shortcut files and present as links / https://fileinfo.com/extension/url
-    $this->set_file_url();
+    if($ext === 'url') $this->set_file_url();
 
     // add to dir files associative array with filename as key
     $this->dir->data['files'][$filename] = $this->file;
@@ -2467,16 +2507,22 @@ class File {
     }
   }
 
-  // read and parse .URL shortcut files and present as links / https://fileinfo.com/extension/url
+  // get url shortcut from .url files
   private function set_file_url(){
-    if(!$this->file['is_readable'] || $this->file['ext'] !== 'url') return;
-    $lines = @file($this->realpath);
-    if(empty($lines) || !is_array($lines)) return;
-    foreach ($lines as $str) {
-      if(!preg_match('/^url\s*=\s*([\S\s]+)/i', trim($str), $matches) || !isset($matches[1])) continue;
-      $this->file['url'] = $matches[1];
-      break;
-    }
+    // get url shortcut
+    $url = U::get_url_shortcut($this->realpath);
+    if(!$url) return;
+    // assign url
+    $this->file['url'] = $url;
+    // if url is a video file, we can play the remote file in the internal player
+    $ext = U::extension($url, true);
+    if(!$ext || !in_array($ext, ['webm', 'm4v', 'mp4', 'm3u8'])) return; // must be video format
+    // blatantly override file properties so the file identifies as a video
+    $this->file = array_replace($this->file, [
+      'ext' => $ext,
+      'url_path' => $url,
+      //'mime' => "video/$ext"
+    ]);
   }
 }
 
@@ -3671,6 +3717,7 @@ foreach (array_filter([
       'upload_max_filesize' => $this->get_upload_max_filesize(), // let the upload interface know upload_max_filesize
       'custom_previews' => $this->get_custom_previews(), // get custom preview images from _files/previews/*
       'is_clean_cache_time' => !$this->index_html && CleanCache::is_time(), // check if is time to clean cache
+      'audio_files' => $this->get_storage_dir_files('audio'), // get audio files from _files/audio/* for global audioplayer
     ]);
   }
 

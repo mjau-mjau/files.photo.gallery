@@ -78,6 +78,7 @@ return [
   //'upload_exists' => 'increment',
   //'ffmpeg_path' => 'ffmpeg',
   //'imagemagick_path' => 'convert',
+  //'imagemagick_prefer_imagick' => true,
   //'imagemagick_image_types' => 'heif, heic, tiff, tif, psd, dng',
   //'use_google_docs_viewer' => false,
   //'lang_default' => 'en',
