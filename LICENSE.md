@@ -1,7 +1,7 @@
 
 # Files Gallery / www.files.gallery
 
-Copyright (c) 2020-2024 Imagevue Co Ltd - All Rights Reserved.
+Copyright (c) 2020-2026 Imagevue Co Ltd - All Rights Reserved.
 
 ## Usage
 You are free to download and use Files app as you like. Application can be used for free with some limitations. Full features available with paid license.
